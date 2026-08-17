@@ -1,0 +1,88 @@
+/* board-ui design tokens — restrained palette (Linear/Vercel-style):
+   blue = task / interaction / progress, green = running ONLY, orange = waiting,
+   gray = neutral stats. Light defaults; dark layer on body[data-ds-dark-theme]. */
+[class^="bb-"],
+[class^="bb-"]::before,
+[class^="bb-"]::after {
+  box-sizing: border-box;
+}
+
+/* Reduced motion: honor the OS setting across every board-ui surface. */
+@media (prefers-reduced-motion: reduce) {
+  [class^="bb-"],
+  [class^="bb-"]::before,
+  [class^="bb-"]::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+:root {
+  --bb-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --bb-font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, "PingFang SC",
+    "Microsoft YaHei", monospace;
+
+  --bb-canvas: #f8fafc;
+  --bb-panel: #ffffff;
+  --bb-panel-2: #f8fafc;
+  --bb-border: #e2e8f0;
+  --bb-border-strong: #cbd5e1;
+  --bb-text: #0f172a;
+  --bb-text-2: #64748b;
+  --bb-text-3: #94a3b8;
+  --bb-brand: #2563eb;
+  --bb-brand-strong: #1d4ed8;
+  --bb-brand-soft: #eff6ff;
+  --bb-col-running: #16a34a;
+  --bb-col-running-soft: #f0fdf4;
+  --bb-col-pending: #d97706;
+  --bb-col-pending-strong: #f59e0b;
+  --bb-col-pending-soft: #fff7ed;
+  --bb-col-done: #64748b;
+  --bb-col-done-soft: #f1f5f9;
+  --bb-success: #16a34a;
+  --bb-success-soft: #f0fdf4;
+  --bb-col-failed: #dc2626;
+  --bb-col-failed-soft: #fef2f2;
+  --bb-overlay: rgba(15, 23, 42, 0.32);
+
+  --bb-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --bb-shadow-card-hover: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --bb-shadow-pop: 0 12px 40px rgba(15, 23, 42, 0.16);
+
+  --bb-radius: 8px;
+  --bb-radius-lg: 12px;
+  --bb-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --bb-topbar-h: 48px;
+}
+
+body[data-ds-dark-theme] {
+  --bb-canvas: #0b1220;
+  --bb-panel: #111827;
+  --bb-panel-2: #0f172a;
+  --bb-border: #1f2937;
+  --bb-border-strong: #334155;
+  --bb-text: #e5e7eb;
+  --bb-text-2: #94a3b8;
+  --bb-text-3: #64748b;
+  --bb-brand: #3b82f6;
+  --bb-brand-strong: #60a5fa;
+  --bb-brand-soft: #1d2e52;
+  --bb-col-running: #22c55e;
+  --bb-col-running-soft: #052e16;
+  --bb-col-pending: #fbbf24;
+  --bb-col-pending-strong: #f59e0b;
+  --bb-col-pending-soft: #3a2a05;
+  --bb-col-done: #94a3b8;
+  --bb-col-done-soft: #1f2937;
+  --bb-success: #4ade80;
+  --bb-success-soft: #052e16;
+  --bb-col-failed: #f87171;
+  --bb-col-failed-soft: #450a0a;
+  --bb-overlay: rgba(0, 0, 0, 0.5);
+
+  --bb-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --bb-shadow-card-hover: 0 8px 22px rgba(0, 0, 0, 0.45);
+  --bb-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.55);
+}

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Temp
+tmp/
+temp/
+.cache/
+
+# Build output (node build.mjs)
+# 注意：lib/ 刻意不忽略 —— 插件运行时直接从 lib/ 消费（link 进 ~/.dsh/profiles/web），
+# 提交构建产物可让仓库 clone 后开箱即用，无需先执行构建。
+# lib/*.map

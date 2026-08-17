@@ -1,0 +1,47 @@
+/* 待执行 column (plans) + plan creation button + per-card project badge.
+   Plans never execute until the user starts them — the column is a real
+   lifecycle state, not a "pool": blue accent, first-class column styling. */
+.bb-col-pending .bb-col-head {
+  background: linear-gradient(180deg, var(--bb-brand-soft), transparent);
+  border-bottom: 1px solid var(--bb-border);
+}
+.bb-col-pending .bb-col-title { color: var(--bb-brand-strong); }
+.bb-col-pending .bb-col-count {
+  background: var(--bb-brand-soft);
+  border-color: var(--bb-brand);
+  color: var(--bb-brand-strong);
+}
+.bb-pool-add {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--bb-border-strong);
+  border-radius: 50%;
+  background: var(--bb-panel);
+  color: var(--bb-text-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.12s var(--bb-ease);
+}
+.bb-pool-add:hover {
+  border-color: var(--bb-brand);
+  background: var(--bb-brand);
+  color: #fff;
+  transform: rotate(90deg);
+}
+
+/* per-card project badge (待执行 cards + status-column cards) */
+.bb-ws-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-width: 0;
+  max-width: 45%;
+  font-size: 11.5px;
+  color: var(--bb-text-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.bb-ws-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
