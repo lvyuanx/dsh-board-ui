@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1440px; overflow: hidden; }
+  body {
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background:
+      radial-gradient(120% 85% at 78% -8%, #182742 0%, #0D1526 52%, #080D19 100%);
+    color: #EAF0FF;
+    position: relative;
+  }
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background-image: radial-gradient(circle, rgba(160,190,255,0.07) 1px, transparent 1.4px);
+    background-size: 34px 34px;
+    pointer-events: none;
+  }
+  body::after {
+    content: ""; position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    opacity: 0.05; mix-blend-mode: overlay; pointer-events: none;
+  }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+  .plus { position: absolute; color: rgba(148,178,255,0.16); font-size: 30px; line-height: 1; font-family: "SF Mono", monospace; }
+  .p1 { left: 60px; top: 420px; } .p2 { left: 60px; top: 1080px; }
+  .p3 { right: 64px; top: 640px; } .p4 { right: 40px; bottom: 210px; }
+
+  .wrap { position: relative; padding: 84px 76px 0; height: 1440px; display: flex; flex-direction: column; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 14px;
+    border: 1.5px solid rgba(148,178,255,0.28); border-radius: 999px;
+    padding: 13px 24px; font-size: 20px; letter-spacing: 0.05em; color: #C6D4EF;
+    background: rgba(148,178,255,0.06);
+  }
+  .pill .dot { width: 13px; height: 13px; border-radius: 50%; background: #34D399; box-shadow: 0 0 14px rgba(52,211,153,0.9); }
+  .ver { font-size: 20px; color: #6E82A6; letter-spacing: 0.18em; }
+
+  .title-block { margin-top: 76px; }
+  .kicker { font-size: 19px; color: #34D399; letter-spacing: 0.38em; text-transform: uppercase; }
+  h1 {
+    margin-top: 26px;
+    font-family: "Songti SC", "STSong", serif;
+    font-weight: 900; font-size: 88px; line-height: 1.24; color: #F2F6FF;
+    letter-spacing: 0.01em;
+  }
+  h1 .accent { position: relative; display: inline-block; }
+  h1 .accent::after {
+    content: ""; position: absolute; left: -4px; right: -6px; bottom: 4px; height: 11px;
+    background: linear-gradient(90deg, rgba(52,211,153,0.85), rgba(52,211,153,0.12));
+    border-radius: 6px; z-index: -1;
+  }
+  .sub {
+    margin-top: 30px; font-size: 24px; color: #A9B9D6; letter-spacing: 0.04em;
+    display: flex; align-items: center; gap: 15px;
+  }
+  .sub .state { font-family: "SF Mono", Menlo, monospace; font-size: 21px; color: #8FA2C2; }
+  .sub .arrow { color: #34D399; }
+
+  .board { margin-top: 74px; display: flex; gap: 14px; }
+  .col {
+    flex: 1; border: 1px solid rgba(148,178,255,0.14); border-radius: 16px;
+    background: rgba(148,178,255,0.045); padding: 14px 12px 12px;
+  }
+  .col-head { display: flex; align-items: center; gap: 8px; padding: 0 4px 11px; }
+  .col-head .cd { width: 9px; height: 9px; border-radius: 3px; }
+  .col-head .cl { font-size: 15px; font-weight: 600; color: #D5E0F5; letter-spacing: 0.02em; }
+  .col-head .cnt {
+    margin-left: auto; font-size: 12px; color: #8FA2C2; font-family: "SF Mono", monospace;
+    border: 1px solid rgba(148,178,255,0.22); border-radius: 999px; padding: 2px 8px;
+  }
+  .card {
+    background: rgba(15,25,44,0.9); border: 1px solid rgba(148,178,255,0.13);
+    border-radius: 11px; padding: 11px 11px 12px; margin-bottom: 9px; position: relative;
+    overflow: hidden;
+  }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+  .card .t { font-size: 13px; font-weight: 500; color: #DCE6F8; line-height: 1.35; margin-bottom: 7px; }
+  .card .bar { height: 5px; border-radius: 3px; background: rgba(148,178,255,0.14); margin-bottom: 5px; }
+  .card .bar.w60 { width: 62%; } .card .bar.w42 { width: 44%; }
+  .card.live { border-color: rgba(52,211,153,0.45); }
+  .card.live .t { display: flex; align-items: center; gap: 8px; }
+  .card.live .t .pulse {
+    width: 8px; height: 8px; border-radius: 50%; background: #34D399; flex: none;
+    box-shadow: 0 0 0 0 rgba(52,211,153,0.55);
+  }
+  .card.live .meta { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: #7FE3BE; }
+  .card.alert { border-color: rgba(245,158,11,0.5); }
+  .card.alert .t { color: #FFE3B3; }
+  .card.done .t { color: #9FB0CC; }
+  .c-blue .cd { background: #60A5FA; } .c-blue .card::before { background: #60A5FA; }
+  .c-green .cd { background: #34D399; } .c-green .card::before { background: #34D399; }
+  .c-orange .cd { background: #F59E0B; } .c-orange .card::before { background: #F59E0B; }
+  .c-gray .cd { background: #64748B; } .c-gray .card::before { background: #64748B; }
+  .c-green2 .cd { background: #60A5FA; } .c-green2 .card::before { background: #60A5FA; }
+
+  .term {
+    margin-top: auto; margin-bottom: 74px;
+    border: 1.5px solid rgba(148,178,255,0.24); border-radius: 20px;
+    background: rgba(8,13,25,0.85);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    overflow: hidden;
+  }
+  .term-bar {
+    display: flex; align-items: center; gap: 10px; padding: 14px 22px;
+    border-bottom: 1px solid rgba(148,178,255,0.14);
+    background: rgba(148,178,255,0.05);
+  }
+  .term-bar .td { width: 12px; height: 12px; border-radius: 50%; }
+  .td.r { background: #F87171; } .td.y { background: #FBBF24; } .td.g { background: #34D399; }
+  .term-bar .path { margin-left: 14px; font-size: 16px; color: #5F7296; letter-spacing: 0.06em; }
+  .term-body {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 28px 32px;
+  }
+  .plug {
+    display: inline-flex; align-items: center; gap: 16px;
+    font-family: "SF Mono", Menlo, monospace; font-size: 40px; font-weight: 600;
+    color: #E8EFFC; letter-spacing: 0.01em; white-space: nowrap;
+  }
+  .plug .gh { width: 56px; height: 56px; color: #E8EFFC; flex: none; }
+  .plug .cursor { display: inline-block; width: 14px; height: 40px; background: #34D399; flex: none; }
+
+  .foot { display: flex; justify-content: space-between; font-size: 17px; color: #54688C; letter-spacing: 0.05em; padding-bottom: 40px; }
+  .foot .mono2 { font-family: "SF Mono", monospace; font-size: 16px; }
+</style>
+<script>
+function diag() {
+  if (new URLSearchParams(location.search).get("diag") !== "1") return;
+  const out = { viewport: [innerWidth, innerHeight], checks: [] };
+  const doc = document.documentElement;
+  out.doc = { scrollW: doc.scrollWidth, scrollH: doc.scrollHeight, clientW: doc.clientWidth, clientH: doc.clientHeight };
+  for (const el of document.querySelectorAll("h1, .plug, .gh, .pname, .cursor, .term-body, .board, .col, .sub, .pill")) {
+    const r = el.getBoundingClientRect();
+    out.checks.push({
+      sel: el.tagName + (typeof el.className === "string" && el.className ? "." + el.className.split(" ")[0] : ""),
+      l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom),
+      scrollW: el.scrollWidth, clientW: el.clientWidth
+    });
+  }
+  out.fonts = {
+    title: getComputedStyle(document.querySelector("h1")).fontFamily,
+    weight: getComputedStyle(document.querySelector("h1")).fontWeight
+  };
+  const gh = document.querySelector("svg.gh");
+  if (gh) {
+    const cs = getComputedStyle(gh);
+    const gr = gh.getBoundingClientRect();
+    const pth = gh.querySelector("path");
+    const bb = pth ? pth.getBBox() : null;
+    const vb = gh.viewBox && gh.viewBox.baseVal;
+    out.svg = {
+      rect: [Math.round(gr.left), Math.round(gr.top), Math.round(gr.width), Math.round(gr.height)],
+      css: [cs.width, cs.height, cs.display],
+      viewBox: vb ? [vb.x, vb.y, vb.width, vb.height] : null,
+      pathBBox: bb ? [+bb.x.toFixed(2), +bb.y.toFixed(2), +bb.width.toFixed(2), +bb.height.toFixed(2)] : null
+    };
+  }
+  const pre = document.createElement("pre");
+  pre.id = "diag"; pre.textContent = JSON.stringify(out);
+  document.body.appendChild(pre);
+}
+window.addEventListener("load", diag);
+</script>
+</head>
+<body>
+  <div class="plus p1">+</div><div class="plus p2">+</div><div class="plus p3">+</div><div class="plus p4">+</div>
+
+  <div class="wrap">
+    <div class="header">
+      <span class="pill"><span class="dot"></span>OPEN SOURCE · CLIENT PLUGIN</span>
+      <span class="ver mono">v0.1.0</span>
+    </div>
+
+    <div class="title-block">
+      <div class="kicker mono">MULTI-AGENT · KANBAN · MISSION CONTROL</div>
+      <h1>多 Agent 调度台<br><span class="accent">× 看板式编排</span></h1>
+      <div class="sub">
+        <span class="state">待执行</span><span class="arrow">→</span>
+        <span class="state">进行中</span><span class="arrow">→</span>
+        <span class="state">需要处理</span><span class="arrow">→</span>
+        <span class="state">验收中</span><span class="arrow">→</span>
+        <span class="state">已完成</span>
+      </div>
+    </div>
+
+    <div class="board">
+      <div class="col c-blue">
+        <div class="col-head"><span class="cd"></span><span class="cl">待执行</span><span class="cnt">3</span></div>
+        <div class="card"><div class="t">生成季度汇报</div><div class="bar w60"></div><div class="bar w42"></div></div>
+        <div class="card"><div class="t">竞品调研</div><div class="bar w60"></div><div class="bar w42"></div></div>
+      </div>
+      <div class="col c-green">
+        <div class="col-head"><span class="cd"></span><span class="cl">进行中</span><span class="cnt">2</span></div>
+        <div class="card live"><div class="t"><span class="pulse"></span>重构数据层</div>
+          <div class="meta mono">● 2 个 Agent 运行中</div></div>
+        <div class="card"><div class="t">爬取行业报告</div><div class="bar w60"></div></div>
+      </div>
+      <div class="col c-orange">
+        <div class="col-head"><span class="cd"></span><span class="cl">需要处理</span><span class="cnt">1</span></div>
+        <div class="card alert"><div class="t">⏸ 等待审批</div><div class="bar w42"></div></div>
+        <div class="card"><div class="t">确认发布范围</div><div class="bar w60"></div></div>
+      </div>
+      <div class="col c-green2">
+        <div class="col-head"><span class="cd"></span><span class="cl">验收中</span><span class="cnt">1</span></div>
+        <div class="card"><div class="t">迁移文档站</div><div class="bar w60"></div><div class="bar w42"></div></div>
+      </div>
+      <div class="col c-gray">
+        <div class="col-head"><span class="cd"></span><span class="cl">已完成</span><span class="cnt">5</span></div>
+        <div class="card done"><div class="t">✓ 上线监控面板</div></div>
+        <div class="card done"><div class="t">✓ 审计脚本</div></div>
+      </div>
+    </div>
+
+    <div class="term">
+      <div class="term-bar">
+        <span class="td r"></span><span class="td y"></span><span class="td g"></span>
+        <span class="path mono">~/dsh/profiles/web/plugins</span>
+      </div>
+      <div class="term-body">
+        <span class="plug">
+          <svg class="gh" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          <span class="pname">dsh-board-ui</span><span class="cursor"></span>
+        </span>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>DeepSeek Harness · 多 Agent 任务编排系统</span>
+      <span class="mono2">MIT · 2026 · board/web</span>
+    </div>
+  </div>
+</body>
+</html>

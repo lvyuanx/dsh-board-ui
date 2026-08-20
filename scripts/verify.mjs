@@ -168,6 +168,18 @@ if (exports_.cardStatusOf({}, true) !== "paused") throw new Error("cardStatusOf 
 if (exports_.columnOf({ blank: true }) !== null) throw new Error("columnOf blank wrong");
 if (exports_.taskStatusOf({ running: true, pendingInteraction: "plan-review" }) !== "action_required")
   throw new Error("plan-review pending must map to action_required");
+if (exports_.taskStatusOf({}, false, false, true) !== "reviewing")
+  throw new Error("review latch must survive the host completed hint being cleared");
+if (exports_.taskStatusOf({}, false, false, true, true) !== "completed")
+  throw new Error("explicit acceptance must complete a latched review");
+const latchedCols = exports_.buildColumns(fake2.ids, { ...fake2.byId, main6: { ...fake2.byId.main6, completed: false } }, fake2.jobsBySession, ["plan1"], undefined, undefined, undefined, ["main6"]);
+if (!latchedCols.reviewing.some((c) => c.id === "main6"))
+  throw new Error("review latch must keep an opened agent task in reviewing");
+const acceptedAt = 1735689600000;
+const acceptedCols = exports_.buildColumns(fake2.ids, { ...fake2.byId, main6: { ...fake2.byId.main6, completed: false } }, fake2.jobsBySession, ["plan1"], undefined, undefined, undefined, [], ["main6"], { main6: acceptedAt });
+const acceptedMain = acceptedCols.completed.find((c) => c.id === "main6");
+if (!acceptedMain || acceptedMain.acceptedAt !== acceptedAt)
+  throw new Error("completed task must expose its explicit acceptance timestamp");
 
 // --- paused sessions keep their card in the running column with the ⏸ badge ---
 const pausedCols = exports_.buildColumns(fake2.ids, fake2.byId, fake2.jobsBySession, ["plan1"], undefined, ["main6"]);

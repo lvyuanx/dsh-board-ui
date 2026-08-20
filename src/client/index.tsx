@@ -40,6 +40,20 @@ export const inject = ["slots", "theme", "locale", "sessions", "workspaces"];
 
 const clampWidth = (px, min, max) => Math.min(max, Math.max(min, px));
 
+const DRAWER_WIDTH_STORAGE_KEY = "dsh-board-ui.drawer-width";
+const DRAWER_WIDTH_DEFAULT = 640;
+
+/** Read the previous drawer width without making app startup depend on storage. */
+function savedDrawerWidth() {
+  try {
+    const saved = window.localStorage.getItem(DRAWER_WIDTH_STORAGE_KEY);
+    const value = saved === null ? NaN : Number(saved);
+    return Number.isFinite(value) ? clampWidth(value, 420, 1100) : DRAWER_WIDTH_DEFAULT;
+  } catch {
+    return DRAWER_WIDTH_DEFAULT;
+  }
+}
+
 /** Frame panel store: nav width, details column, current theme preference. */
 function createFrameStore() {
   return defineStore({
@@ -50,7 +64,7 @@ function createFrameStore() {
       themePref: "system",
       drawerTab: "chat",
       drawerOpen: false,
-      drawerWidth: 640,
+      drawerWidth: savedDrawerWidth(),
       workspaceFilter: null
     }),
     actions: {
@@ -79,7 +93,13 @@ function createFrameStore() {
         d.drawerOpen = open;
       },
       setDrawerWidth: (d, px) => {
-        d.drawerWidth = clampWidth(px, 420, 1100);
+        const width = clampWidth(px, 420, 1100);
+        d.drawerWidth = width;
+        try {
+          window.localStorage.setItem(DRAWER_WIDTH_STORAGE_KEY, String(width));
+        } catch {
+          // Storage can be unavailable (e.g. privacy mode); the in-memory width still works.
+        }
       },
       setWorkspaceFilter: (d, workspaceId) => {
         d.workspaceFilter = workspaceId;
@@ -89,7 +109,7 @@ function createFrameStore() {
 }
 
 /** Board store: keyboard focus, workspace filter, planning-session ids, and
- * paused-session ids.
+ * paused-session ids, and explicit review decisions.
  *
  * A planning session (created from the 待执行 +) is a PLAN: it never shows in
  * the status columns — only when the user starts executing it does it leave
@@ -105,7 +125,7 @@ function createFrameStore() {
  * plan into the status columns on upgrade). */
 function createBoardStore() {
   return defineStore({
-    init: () => ({ focus: null, filter: null, planningIds: [], pausedIds: [] }),
+    init: () => ({ focus: null, filter: null, planningIds: [], pausedIds: [], reviewPendingIds: [], acceptedIds: [], acceptedAtById: {}, mainErrors: {} }),
     // v2: the v1 shape ({tasks}) is incompatible — a fresh key drops it.
     persist: "dsh.board.board.v2",
     actions: {
@@ -126,6 +146,37 @@ function createBoardStore() {
       },
       unmarkPaused: (d, id) => {
         d.pausedIds = (d.pausedIds ?? []).filter((x) => x !== id);
+      },
+      markReviewPending: (d, id) => {
+        if (!(d.reviewPendingIds ?? []).includes(id)) d.reviewPendingIds = [...(d.reviewPendingIds ?? []), id];
+      },
+      acceptReview: (d, id) => {
+        d.reviewPendingIds = (d.reviewPendingIds ?? []).filter((x) => x !== id);
+        if (!(d.acceptedIds ?? []).includes(id)) d.acceptedIds = [...(d.acceptedIds ?? []), id];
+        d.acceptedAtById = { ...(d.acceptedAtById ?? {}), [id]: Date.now() };
+      },
+      clearReviewDecision: (d, id) => {
+        d.reviewPendingIds = (d.reviewPendingIds ?? []).filter((x) => x !== id);
+        d.acceptedIds = (d.acceptedIds ?? []).filter((x) => x !== id);
+        const acceptedAtById = { ...(d.acceptedAtById ?? {}) };
+        delete acceptedAtById[id];
+        d.acceptedAtById = acceptedAtById;
+      },
+      // Main-session turn failures (LLM/API errors like server_is_overloaded)
+      // are not exposed by the host list projection; the board records the
+      // last turn/end error read from the opened conversation so such tasks
+      // land in 失败 instead of 已完成. Value: {message, code?}.
+      setMainError: (d, id, err) => {
+        const cur = d.mainErrors ?? {};
+        if (cur[id] !== void 0 && cur[id].message === err.message && cur[id].code === err.code) return;
+        d.mainErrors = { ...cur, [id]: err };
+      },
+      clearMainError: (d, id) => {
+        const cur = d.mainErrors ?? {};
+        if (cur[id] === void 0) return;
+        const next = { ...cur };
+        delete next[id];
+        d.mainErrors = next;
       }
     }
   });
@@ -238,6 +289,10 @@ export function apply(ctx) {
         actions.syncTheme(ctx.theme.getTheme().preference);
         return {
           injectBuildTag: BUILD_TAG,
+          openSession: (id) => {
+            frameActions?.setDrawerOpen(true);
+            ctx.sessions.open(id);
+          },
           cycleTheme: () => {
             const pref = ctx.theme.getTheme().preference;
             const next = pref === "light" ? "dark" : pref === "dark" ? "system" : "light";
@@ -265,7 +320,7 @@ export function apply(ctx) {
   // prompts to the REAL session agent — they never fabricate UI state.
   const RE_VERIFY_PROMPT = "请对刚才完成的执行结果进行最终验收：逐项检查各子 Agent 的产出是否满足任务要求。如发现问题请重新执行并修复；验收通过后请总结结论。";
   const RE_RUN_PROMPT = "请重新执行这个任务，完成后进行最终验收并总结结果。";
-  const RETRY_PROMPT = "有子 Agent 执行失败。请重试失败的部分，继续完成任务，并完成最终验收。";
+  const RETRY_PROMPT = "任务之前的执行出现失败。请在当前任务上下文中继续执行，不要重新创建任务：先检查并修复失败原因，重试失败的部分，完成剩余工作，并在最后汇总结果。";
   // A planning session starts executing when the user says so IN the chat
   // (START_RE / READ_ONLY_TOOLS live next to the pure conversation check in
   // columns.ts).
@@ -320,6 +375,32 @@ export function apply(ctx) {
     const result = await withBinding(sessionId, (session) => session.prompt([{ type: "text", text: content }], "queue"));
     if (!result.ok) throw new Error("session.prompt failed: " + (result.error?.code ?? "unknown") + ": " + (result.error?.message ?? ""));
   };
+  // Last main-session turn failure read off the opened conversation's
+  // timeline: the host list projection carries no main-session error, so
+  // the ONLY truthful source is the conversation's turn/end reason (the
+  // same persistence the chat UI uses for its turn-error row). Returns the
+  // error {message, code?} of the LAST closed turn, or null when the last
+  // turn ended normally; undefined while the conversation window is not
+  // loaded yet (opened sessions only — a never-opened session has no
+  // conversation window, so its main-session outcome stays unknown).
+  const mainErrorOf = (id) => {
+    const session = ctx.sessions.binding(id)?.session;
+    if (session === undefined) return undefined;
+    const chat = session.conversation?.snapshot("chat");
+    const turns = chat?.timeline?.turns;
+    if (turns === void 0 || turns.size === 0) return undefined;
+    // the LAST CLOSED turn — an in-flight turn has no end yet and must not
+    // clear a recorded failure (or mask a fresh one) while it runs
+    const closed = [...turns.values()].filter((t) => t?.end !== void 0).sort((a, b) => b.turn - a.turn);
+    if (closed.length === 0) return undefined;
+    const reason = closed[0].end?.data?.reason;
+    if (reason?.kind !== "error") return null;
+    const failure = reason.error ?? {};
+    return {
+      message: typeof failure.message === "string" && failure.message !== "" ? failure.message : "turn failed",
+      ...failure.code !== void 0 ? { code: failure.code } : {}
+    };
+  };
   ctx.slots.register({
     name: "board",
     locale: "board",
@@ -329,6 +410,21 @@ export function apply(ctx) {
       openSession: (id) => {
         frameActions?.setDrawerOpen(true);
         ctx.sessions.open(id);
+        // Main-session failure sync: the conversation window loads
+        // ASYNCHRONOUSLY once the session is staged, so read the last turn's
+        // end reason a few times after open — a task whose main session ended
+        // in an LLM/API error lands in 失败 instead of lingering as 已完成.
+        {
+          let tries = 0;
+          const check = () => {
+            if (tries++ >= 40) return;
+            const err = face.mainErrorOf(id);
+            if (err === undefined) { setTimeout(check, 100); return; }
+            if (err === null) boardActions.clearMainError(id);
+            else boardActions.setMainError(id, err);
+          };
+          setTimeout(check, 200);
+        }
         // Plan review on open: a plan's conversation window loads
         // ASYNCHRONOUSLY once the session is staged, so the Board's effect
         // (keyed on the sessions list projection) may never see the start
@@ -394,9 +490,21 @@ export function apply(ctx) {
         boardActions.unmarkPaused(sessionId);
         await promptSession(sessionId, "请继续执行。");
       },
-      reVerifySession: (sessionId) => promptSession(sessionId, RE_VERIFY_PROMPT),
-      reRunSession: (sessionId) => promptSession(sessionId, RE_RUN_PROMPT),
-      retrySession: (sessionId) => promptSession(sessionId, RETRY_PROMPT),
+      acceptSession: (sessionId) => {
+        boardActions.acceptReview(sessionId);
+      },
+      reVerifySession: (sessionId) => {
+        boardActions.clearReviewDecision(sessionId);
+        return promptSession(sessionId, RE_VERIFY_PROMPT);
+      },
+      reRunSession: (sessionId) => {
+        boardActions.clearReviewDecision(sessionId);
+        return promptSession(sessionId, RE_RUN_PROMPT);
+      },
+      retrySession: (sessionId) => {
+        boardActions.clearReviewDecision(sessionId);
+        return promptSession(sessionId, RETRY_PROMPT);
+      },
       openActivity: (sessionId) => {
         frameActions?.setDrawerOpen(true);
         frameActions?.setDrawerTab("activity");
@@ -415,6 +523,7 @@ export function apply(ctx) {
         const nodes = session.conversation?.snapshot("chat")?.legacy?.nodes ?? [];
         return planStartedInConversation(nodes);
       },
+      mainErrorOf,
       };
       return face;
     }
@@ -441,7 +550,8 @@ export function apply(ctx) {
     inject: () => ({
       switchToChat: () => {
         frameActions?.setDrawerTab("chat");
-      }
+      },
+      mainErrorOf
     })
   }, ActivityPanel);
 }

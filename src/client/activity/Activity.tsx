@@ -1,7 +1,9 @@
 /** ActivityPanel — the drawer's second tab (session-scoped entry in the
- * 'activity' slot): pending-interaction banner, background jobs, subagents.
- * Reads root-scope list projections (jobsBySession / subagentsByParent) via
- * useSessions; switchToChat comes from the inject face. */
+ * 'activity' slot): pending-interaction banner, main-session failure,
+ * background jobs, subagents. Reads root-scope list projections
+ * (jobsBySession / subagentsByParent) via useSessions; switchToChat and
+ * mainErrorOf come from the inject face. */
+import { useEffect, useState } from "react";
 
 function durationOf(job, t) {
   if (!job.startedAt) return "";
@@ -13,8 +15,29 @@ function durationOf(job, t) {
   return Math.floor(min / 60) + "h " + (min % 60) + "m";
 }
 
-export function ActivityPanel({ sessionId, useSessions, t, switchToChat }) {
+export function ActivityPanel({ sessionId, useSessions, t, switchToChat, mainErrorOf }) {
   const snap = useSessions((s) => s);
+  // Main-session turn failure (LLM/API error): read off the opened
+  // conversation's last closed turn. The window loads asynchronously, so poll
+  // briefly after mount (same pattern as the board's openSession sync).
+  const [mainError, setMainError] = useState(null);
+  useEffect(() => {
+    if (mainErrorOf === undefined) return;
+    let cancelled = false;
+    let tries = 0;
+    const check = () => {
+      if (cancelled) return;
+      const err = mainErrorOf(sessionId);
+      if (err === undefined) {
+        if (tries++ < 40) setTimeout(check, 100);
+        return;
+      }
+      setMainError(err);
+    };
+    const timer = setTimeout(check, 150);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [sessionId, mainErrorOf]);
+
   const jobs = snap.jobsBySession?.[sessionId] ?? [];
   // healthy children plus catalog diagnostic rows (✕ failed — surfaced
   // instead of silently dropped so the failure legend stays truthful)
@@ -27,6 +50,16 @@ export function ActivityPanel({ sessionId, useSessions, t, switchToChat }) {
 
   return (
     <div className="bb-act">
+      {mainError !== null && mainError !== undefined && (
+        <div className="bb-act-error">
+          <div className="bb-act-error-head">
+            <span aria-hidden>⚠</span>
+            <span>{t("act.mainError")}</span>
+          </div>
+          <div className="bb-act-error-msg">{mainError.message}</div>
+          {mainError.code !== void 0 && <code className="bb-act-error-code">{mainError.code}</code>}
+        </div>
+      )}
       {pending && (
         <div className="bb-act-banner">
           <span className="bb-act-banner-text">{t("act.pending")}</span>

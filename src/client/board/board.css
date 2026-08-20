@@ -122,12 +122,13 @@
   box-shadow: 0 0 0 3px var(--bb-brand-soft);
 }
 .bb-card.is-focused { box-shadow: 0 0 0 2px var(--bb-brand) inset, var(--bb-shadow-card-hover); }
-/* per-status left accent — one color per lifecycle state (blue 待执行/验收中,
-   green 进行中, orange 需要处理, gray 已暂停, none 已完成) */
+/* per-status left accent — blue pending/review, green running, orange action,
+   red failure, gray paused, and neutral completed. */
 .bb-card[data-status="pending"] { border-left: 3px solid var(--bb-brand); }
 .bb-card[data-status="running"] { border-left: 3px solid var(--bb-col-running); }
 .bb-card[data-status="action_required"] { border-left: 3px solid var(--bb-col-pending); }
 .bb-card[data-status="reviewing"] { border-left: 3px solid var(--bb-brand); }
+.bb-card[data-status="failed"] { border-left: 3px solid var(--bb-col-failed); }
 .bb-card[data-status="paused"] { border-left: 3px solid var(--bb-text-3); }
 /* shared card anatomy: head (project + time) / title / status badge /
    hint lines / agent stats / progress / actions */
@@ -183,13 +184,15 @@
 .bb-status-badge[data-kind="paused"] { color: var(--bb-text-2); background: var(--bb-panel-2); }
 .bb-status-badge[data-kind="action_required"] { color: var(--bb-col-pending); background: var(--bb-col-pending-soft); }
 .bb-status-badge[data-kind="reviewing"] { color: var(--bb-brand-strong); background: var(--bb-brand-soft); }
+.bb-status-badge[data-kind="failed"] { color: var(--bb-col-failed); background: var(--bb-col-failed-soft); }
 .bb-status-badge[data-kind="completed"] { color: var(--bb-success); background: var(--bb-success-soft); }
 
 /* status hint lines — the reason a card sits where it sits */
 .bb-card-hint {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   margin-top: 8px;
   font-size: 11.5px;
   line-height: 1.4;
@@ -199,6 +202,10 @@
 .bb-card-hint[data-kind="reviewing"] { color: var(--bb-brand-strong); }
 .bb-card-hint[data-kind="done"] { color: var(--bb-text-3); }
 .bb-card-hint[data-kind="failed"] { color: var(--bb-col-failed); }
+/* the failure MESSAGE is the flexible line — it wraps instead of pushing the
+   action buttons past the card edge; the buttons wrap to their own row and
+   sit right-aligned below it */
+.bb-card-hint-msg { flex: 1 1 0%; min-width: 0; overflow-wrap: anywhere; }
 .bb-card-hint-actions { margin-left: auto; display: inline-flex; gap: 4px; flex: none; }
 .bb-card-hint-btn {
   padding: 1px 8px;

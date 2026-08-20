@@ -4,16 +4,16 @@
  * the subagent catalog (subagentsByParent) for authoritative per-card agent
  * execution totals.
  *
- * Task lifecycle (five columns — 待执行 / 进行中 / 需要处理 / 验收中 / 已完成):
+ * Task lifecycle (six columns — 待执行 / 进行中 / 需要处理 / 验收中 / 失败 / 已完成):
  *
  *   待执行 ──开始执行──▶ 进行中 ──全部 Agent 完成──▶ 验收中 ──验收通过──▶ 已完成
  *                        │  ▲                        │
  *                需要人工 │  │ 处理完成               │ 验收失败
  *                        ▼  │                        ▼
- *                    需要处理 ──────────────────▶ 进行中（重新执行）
+ *                    需要处理 ──────────────────▶ 失败 ──重试──▶ 进行中
  *
- * 需要处理 is a BRANCH state, not a mandatory hop; 失败 and 暂停 are task-level
- * operation states shown ON cards, never extra columns.
+ * 需要处理 is a BRANCH state, not a mandatory hop; 暂停 remains a card-level
+ * operation state shown in the 进行中 column.
  *
  * State mapping on the runtime projection (no backend changes — the host has
  * no acceptance/review state today, so 验收中 is a front-end mapping, see
@@ -32,6 +32,7 @@ export type TaskStatus =
   | "paused"           // ⏸ 已暂停 — client-side pause mark; stays in the running column
   | "action_required"  // 需要处理 — user interaction blocking the agent
   | "reviewing"        // 验收中 — execution finished, final acceptance pending
+  | "failed"           // 失败 — a stopped task has one or more failed agents
   | "completed";       // 已完成 — accepted
 
 /** Column keys — every status except the card-level "paused" pseudo-state. */
@@ -42,6 +43,7 @@ export const COLUMNS: { key: ColumnKey; dot: string }[] = [
   { key: "running", dot: "var(--bb-col-running)" },
   { key: "action_required", dot: "var(--bb-col-pending)" },
   { key: "reviewing", dot: "var(--bb-brand)" },
+  { key: "failed", dot: "var(--bb-col-failed)" },
   { key: "completed", dot: "var(--bb-col-done)" }
 ];
 
@@ -49,34 +51,34 @@ export const COLUMNS: { key: ColumnKey; dot: string }[] = [
  *
  * Priority: 需要处理 (live user-blocking interaction — the runtime's own
  * presentation gives it precedence over running) → 进行中 (turn open) →
- * paused (client pause mark; the card stays in the 进行中 column) → 验收中 →
- * 已完成.
+ * paused (client pause mark; the card stays in the 进行中 column) → 失败
+ * (stopped task with failed agents) → 验收中 → 已完成.
  *
- * TODO(acceptance): the host exposes no review/acceptance state. 验收中 is a
- * front-end mapping onto the runtime's real `completed` flag (the host's
- * "finished while not selected and not yet opened" reminder, cleared on
- * open): an agent task whose execution closed but which nobody has reviewed
- * yet is shown as awaiting final acceptance, and opening it (the review) is
- * the acceptance step. Replace with a real master-agent/acceptance RPC when
- * the backend grows one. */
-export function taskStatusOf(session, paused = false) {
+ * The host's `completed` flag is only a transient “unseen finished” hint
+ * and is cleared when a session is opened. Therefore the board persists two
+ * explicit client-side decisions: `awaitingReview` keeps an agent task in
+ * 验收中 after its result is viewed, and `accepted` moves it to 已完成 only
+ * after the user chooses 通过验收. Replace these with a real acceptance RPC
+ * when the backend grows one. */
+export function taskStatusOf(session, paused = false, failed = false, awaitingReview = false, accepted = false) {
   if (session.blank) return null;
   if (session.pendingInteraction) return "action_required";
   if (session.running) return "running";
   if (paused) return "paused";
-  if (session.completed === true) return "reviewing";
+  if (failed) return "failed";
+  if (awaitingReview || session.completed === true) return accepted ? "completed" : "reviewing";
   return "completed";
 }
 
 /** Column a session card belongs to; null hides it (blank drafts). */
-export function columnOf(session, paused = false) {
-  const status = taskStatusOf(session, paused);
+export function columnOf(session, paused = false, failed = false, awaitingReview = false, accepted = false) {
+  const status = taskStatusOf(session, paused, failed, awaitingReview, accepted);
   return status === null ? null : status === "paused" ? "running" : status;
 }
 
 /** Card badge status for a rendered card (blank sessions never render). */
-export function cardStatusOf(session, paused = false) {
-  return taskStatusOf(session, paused) ?? "completed";
+export function cardStatusOf(session, paused = false, failed = false, awaitingReview = false, accepted = false) {
+  return taskStatusOf(session, paused, failed, awaitingReview, accepted) ?? "completed";
 }
 
 /** Direct-children index: parentId -> child session ids (one pass). */
@@ -161,11 +163,18 @@ export function agentStatsOf(parentId, byId, childrenOf, subagentsByParent) {
  * Only MAIN tasks become cards (subagent sessions carry parentId and are
  * aggregated into per-card agent counts instead); planning sessions (plans)
  * are excluded — they live in the 待执行 column until executed. Paused ids
- * (board store) keep their cards in the 进行中 column with the ⏸ badge. */
-export function buildColumns(ids, byId, jobsBySession, planningIds, subagentsByParent, pausedIds) {
+ * (board store) keep their cards in the 进行中 column with the ⏸ badge.
+ * mainErrors (board store) — a session whose MAIN turn ended in an LLM/API
+ * error (e.g. server_is_overloaded) even though its sub-agents all succeeded:
+ * the host list projection exposes no main-session failure, so the board
+ * records the last turn/end error reason read from the opened conversation
+ * and treats it as a task failure too (agentFailed OR mainError → 失败). */
+export function buildColumns(ids, byId, jobsBySession, planningIds, subagentsByParent, pausedIds, mainErrors, reviewPendingIds, acceptedIds, acceptedAtById) {
   const planning = new Set(planningIds ?? []);
   const paused = new Set(pausedIds ?? []);
-  const buckets = { pending: [], running: [], action_required: [], reviewing: [], completed: [] };
+  const reviewPending = new Set(reviewPendingIds ?? []);
+  const accepted = new Set(acceptedIds ?? []);
+  const buckets = { pending: [], running: [], action_required: [], reviewing: [], failed: [], completed: [] };
   const childrenOf = childrenMapOf(ids, byId);
   for (const id of ids) {
     const session = byId[id];
@@ -173,14 +182,15 @@ export function buildColumns(ids, byId, jobsBySession, planningIds, subagentsByP
     if (session.parentId !== undefined) continue; // subagent session — not a card
     if (planning.has(id)) continue; // plan — stays in the 待执行 column
     const stats = agentStatsOf(id, byId, childrenOf, subagentsByParent);
-    let status = taskStatusOf(session, paused.has(id));
+    const mainError = mainErrors?.[id] ?? null;
+    let status = taskStatusOf(session, paused.has(id), stats.agentFailed > 0 || mainError !== null, reviewPending.has(id), accepted.has(id));
     if (status === null) continue;
     // 验收中 requires actual agent work — a plain Q&A session has no
     // acceptance step and goes straight to 已完成 (see taskStatusOf TODO).
     if (status === "reviewing" && stats.agentTotal === 0) status = "completed";
     const key = status === "paused" ? "running" : status;
     const jobs = Array.isArray(jobsBySession?.[id]) ? jobsBySession[id].length : 0;
-    buckets[key].push({ id, session, jobs, status, ...stats });
+    buckets[key].push({ id, session, jobs, status, mainError, acceptedAt: acceptedAtById?.[id], ...stats });
   }
   for (const list of Object.values(buckets)) {
     list.sort((a, b) => (b.session.updatedAt ?? 0) - (a.session.updatedAt ?? 0));

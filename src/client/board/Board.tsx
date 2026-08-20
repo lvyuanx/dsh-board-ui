@@ -1,10 +1,9 @@
 /** Board — the kanban seat registered into the 'board' slot.
  *
- * Five lifecycle columns: 待执行 (planning sessions — plans never run until
- * the user starts them) → 进行中 / 需要处理 / 验收中 → 已完成, derived from the
- * runtime projection in columns.ts (pendingInteraction outranks running; a
- * finished-but-unreviewed agent task sits in 验收中 until opened; 暂停 and
- * 失败 are card-level states, never columns).
+ * Six lifecycle columns: 待执行 (planning sessions — plans never run until
+ * the user starts them) → 进行中 / 需要处理 / 验收中 / 失败 / 已完成, derived
+ * from the runtime projection in columns.ts. Failed agent diagnostics are kept
+ * separate from successful completion; 暂停 remains a card-level state.
  *
  * Other interactions: workspace filter, right-click menu, inline rename,
  * drag-to-reorder within a column, blank-click drawer collapse, j/k keyboard
@@ -23,21 +22,22 @@ const TASK_DRAG = "text/board-task";
  * every render and trip the Object.is snapshot equality (render loop). */
 const EMPTY_IDS = [];
 /** The 待执行 column is rendered specially (plan cards + create button);
- * the four execution columns come from COLUMNS. */
+ * the six execution columns come from COLUMNS. */
 const STATUS_COLUMNS = COLUMNS.filter((c) => c.key !== "pending");
 
 /** Status badge vocabulary — light background + dark text, one color per
  * lifecycle state: blue 待执行, green ● 进行中, orange ⚠ 需要处理, blue ◐
- * 验收中, gray ⏸ 已暂停, green ✓ 已完成 (success/acceptance passed). */
+ * 验收中, red ✕ 失败, gray ⏸ 已暂停, green ✓ 已完成. */
 const STATUS_LABEL_KEY = {
   pending: "card.statusPending",
   running: "card.statusRunning",
   paused: "card.statusPaused",
   action_required: "card.statusActionRequired",
   reviewing: "card.statusReviewing",
+  failed: "card.statusFailed",
   completed: "card.statusDone"
 };
-const STATUS_GLYPH = { running: "●", paused: "⏸", action_required: "⚠", reviewing: "◐", completed: "✓" };
+const STATUS_GLYPH = { running: "●", paused: "⏸", action_required: "⚠", reviewing: "◐", failed: "✕", completed: "✓" };
 
 function StatusBadge({ status, t }) {
   const glyph = STATUS_GLYPH[status];
@@ -103,7 +103,7 @@ function AgentStatsRow({ running, done, waiting, failed, total, showBar, t }) {
 /** Status hint line: why the card sits where it sits — the concrete pending
  * reason (需要处理), the acceptance note (验收中), the failure alert with
  * 重试/查看错误 (any status), or the acceptance meta (已完成). */
-function HintLine({ status, session, failed, t, onRetry, onViewError }) {
+function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, onViewError }) {
   const lines = [];
   if (status === "action_required") {
     const reason = session.pendingInteraction === "approval"
@@ -119,18 +119,18 @@ function HintLine({ status, session, failed, t, onRetry, onViewError }) {
       <div key="reviewing" className="bb-card-hint" data-kind="reviewing">{t("card.reviewingHint")}</div>
     );
   }
-  if (failed > 0) {
+  if (failed > 0 || mainError !== null) {
     lines.push(
       <div key="failed" className="bb-card-hint" data-kind="failed">
         <span aria-hidden>⚠</span>
-        <span>{t("card.failedHint", { n: failed })}</span>
+        <span className="bb-card-hint-msg">{failed > 0 ? t("card.failedHint", { n: failed }) : t("card.mainErrorHint", { message: mainError.message })}</span>
         <span className="bb-card-hint-actions">
           <button
             type="button"
             className="bb-card-hint-btn"
             onClick={(e) => { e.stopPropagation(); onRetry(); }}
           >
-            {t("task.retry")}
+            {t("task.restart")}
           </button>
           <button
             type="button"
@@ -143,10 +143,10 @@ function HintLine({ status, session, failed, t, onRetry, onViewError }) {
       </div>
     );
   }
-  if (status === "completed" && failed === 0 && session.updatedAt) {
+  if (status === "completed" && failed === 0 && mainError === null && (acceptedAt ?? session.updatedAt)) {
     lines.push(
       <div key="accepted" className="bb-card-hint" data-kind="done">
-        {t("card.acceptedMeta", { time: relativeTime(session.updatedAt, t) })}
+        {t("card.acceptedMeta", { time: relativeTime(acceptedAt ?? session.updatedAt, t) })}
       </div>
     );
   }
@@ -156,7 +156,7 @@ function HintLine({ status, session, failed, t, onRetry, onViewError }) {
 /** Task card (plans + sessions share one anatomy): head → title → status
  * badge → hint → agent stats → progress → one primary action + ⋯ menu. */
 function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing, draft, primaryLabel, t, onOpen, onPrimary, onMenu, onStartRename, onDraft, onCommitRename, onDragStart, onRetry, onViewError }) {
-  const { session, status, agentRunning, agentDone, agentWaiting, agentFailed, agentTotal } = item;
+  const { session, status, acceptedAt, agentRunning, agentDone, agentWaiting, agentFailed, agentTotal, mainError } = item;
   if (editing) {
     return (
       <div className="bb-card bb-card-editing">
@@ -204,7 +204,9 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
       <HintLine
         status={status}
         session={session}
+        acceptedAt={acceptedAt}
         failed={agentFailed}
+        mainError={mainError ?? null}
         t={t}
         onRetry={onRetry}
         onViewError={onViewError}
@@ -236,10 +238,16 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
   );
 }
 
-export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter, onFilterChange, openSession, openActivity, collapseDrawer, renameSession, forkSession, archiveSession, reorderSession, startTaskPlanning, executePlan, pauseSession, resumeSession, reVerifySession, reRunSession, retrySession, shouldLeavePool }) {
+const EMPTY_ERRORS = {};
+
+export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter, onFilterChange, openSession, openActivity, collapseDrawer, renameSession, forkSession, archiveSession, reorderSession, startTaskPlanning, executePlan, pauseSession, resumeSession, acceptSession, reVerifySession, reRunSession, retrySession, shouldLeavePool, mainErrorOf }) {
   const focus = useStore((s) => s.focus);
   const planningIds = useStore((s) => s.planningIds) ?? EMPTY_IDS;
   const pausedIds = useStore((s) => s.pausedIds) ?? EMPTY_IDS;
+  const reviewPendingIds = useStore((s) => s.reviewPendingIds) ?? EMPTY_IDS;
+  const acceptedIds = useStore((s) => s.acceptedIds) ?? EMPTY_IDS;
+  const acceptedAtById = useStore((s) => s.acceptedAtById) ?? EMPTY_ERRORS;
+  const mainErrors = useStore((s) => s.mainErrors) ?? EMPTY_ERRORS;
   const snap = useSessions((s) => s);
   const wsList = useWorkspaces((s) => s);
   const views = useMemo(() => workspaceViewsOf(wsList), [wsList]);
@@ -249,8 +257,8 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     [snap.ids, snap.byId, views, filter]
   );
   const buckets = useMemo(
-    () => buildColumns(ids, snap.byId, snap.jobsBySession, planningIds, snap.subagentsByParent, pausedIds),
-    [ids, snap.byId, snap.jobsBySession, planningIds, snap.subagentsByParent, pausedIds]
+    () => buildColumns(ids, snap.byId, snap.jobsBySession, planningIds, snap.subagentsByParent, pausedIds, mainErrors, reviewPendingIds, acceptedIds, acceptedAtById),
+    [ids, snap.byId, snap.jobsBySession, planningIds, snap.subagentsByParent, pausedIds, mainErrors, reviewPendingIds, acceptedIds, acceptedAtById]
   );
 
   // planning sessions (待执行 cards), newest activity first, grouped by
@@ -288,8 +296,22 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     if (key === "running") return t("col.running.sub", { n: items.reduce((sum, it) => sum + it.agentRunning, 0) });
     if (key === "action_required") return t("col.action_required.sub");
     if (key === "reviewing") return t("col.reviewing.sub");
+    if (key === "failed") return t("col.failed.sub");
     return t("col.completed.sub");
   };
+
+  // Capture the host's one-shot completed hint before it disappears when the
+  // task is opened. This makes viewing a result non-destructive: the card stays
+  // in 验收中 until the user explicitly accepts it.
+  useEffect(() => {
+    const childrenOf = childrenMapOf(snap.ids, snap.byId);
+    for (const id of ids) {
+      const session = snap.byId[id];
+      if (session?.completed !== true || session.parentId !== undefined) continue;
+      const stats = agentStatsOf(id, snap.byId, childrenOf, snap.subagentsByParent);
+      if (stats.agentTotal > 0) actions.markReviewPending(id);
+    }
+  }, [ids, snap, actions]);
 
   // stale pause marks: a pause mark is set optimistically while the cancel
   // RPC is in flight (the projection still says running). Only clear it once
@@ -314,6 +336,32 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
       if (!pausedIds.includes(id)) pausedStopped.current.delete(id);
     }
   }, [pausedIds, snap]);
+
+  // Main-session turn failures: the host list projection never reports a
+  // main-session error, so for every OPENED session we read the last closed
+  // turn's end reason off the conversation (mainErrorOf) and mirror it into
+  // the board store. Reading only happens while a conversation window exists
+  // (opened sessions); never-opened sessions keep whatever was last recorded
+  // (persisted), and sessions whose last closed turn ended cleanly clear the
+  // record (the card then falls back to its projection-based status).
+  useEffect(() => {
+    if (mainErrorOf === undefined) return;
+    const seen = new Set();
+    for (const id of Object.keys(mainErrors)) {
+      const err = mainErrorOf(id);
+      if (err === undefined) continue; // conversation not loaded — keep the record
+      seen.add(id);
+      if (err === null) actions.clearMainError(id);
+      else actions.setMainError(id, err);
+    }
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      const err = mainErrorOf(id);
+      if (err === undefined) continue;
+      if (err === null) actions.clearMainError(id);
+      else actions.setMainError(id, err);
+    }
+  }, [ids, mainErrors, mainErrorOf, actions]);
 
   // 待执行 → status-column transitions, driven by the STORE planningIds so
   // persisted plans are covered, re-evaluated on every sessions change:
@@ -436,7 +484,13 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     collapseDrawer();
   };
 
-  const openFrom = (id) => { actions.setFocus(id); openSession(id); };
+  const openFrom = (id) => {
+    // The runtime clears its completed hint as soon as the task is opened.
+    // Latch review first so viewing the result cannot imply acceptance.
+    if (buckets.reviewing.some((item) => item.id === id)) actions.markReviewPending(id);
+    actions.setFocus(id);
+    openSession(id);
+  };
 
   // One primary action per status (section 十六); the rest live in ⋯.
   const primaryOf = (item) => {
@@ -444,7 +498,8 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     if (item.status === "running") return { label: t("task.pause"), run: () => pauseSession(id).catch((err) => console.warn("board-ui: pause failed:", err)) };
     if (item.status === "paused") return { label: t("task.resume"), run: () => resumeSession(id).catch((err) => console.warn("board-ui: resume failed:", err)) };
     if (item.status === "action_required") return { label: t("task.handle"), run: () => openFrom(id) };
-    if (item.status === "reviewing") return { label: t("task.viewReview"), run: () => openFrom(id) };
+    if (item.status === "reviewing") return { label: t("task.accept"), run: () => acceptSession(id) };
+    if (item.status === "failed") return { label: t("task.restart"), run: () => retrySession(id).catch((err) => console.warn("board-ui: retry failed:", err)) };
     return { label: t("task.viewResult"), run: () => openFrom(id) };
   };
 
@@ -459,7 +514,15 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     } else if (item.status === "action_required") {
       items.push({ label: t("task.viewReason"), run: () => { setMenu(MENU_NONE); openActivity(id); } });
     } else if (item.status === "reviewing") {
-      items.push({ label: t("task.reviewAgain"), run: () => { setMenu(MENU_NONE); reVerifySession(id).catch((err) => console.warn("board-ui: re-review failed:", err)); } });
+      items.push(
+        { label: t("task.viewReview"), run: () => { setMenu(MENU_NONE); openFrom(id); } },
+        { label: t("task.reviewAgain"), run: () => { setMenu(MENU_NONE); reVerifySession(id).catch((err) => console.warn("board-ui: re-review failed:", err)); } }
+      );
+    } else if (item.status === "failed") {
+      items.push(
+        { label: t("task.restart"), run: () => { setMenu(MENU_NONE); retrySession(id).catch((err) => console.warn("board-ui: retry failed:", err)); } },
+        { label: t("task.viewError"), run: () => { setMenu(MENU_NONE); openActivity(id); } }
+      );
     } else {
       items.push({ label: t("task.reRun"), run: () => { setMenu(MENU_NONE); reRunSession(id).catch((err) => console.warn("board-ui: re-run failed:", err)); } });
     }

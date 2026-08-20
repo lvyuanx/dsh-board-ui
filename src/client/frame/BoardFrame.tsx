@@ -103,12 +103,33 @@ function DrawerHandle({ width, onResize }) {
   );
 }
 
-export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, renderSlot, t, cycleTheme, injectBuildTag }) {
+export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, renderSlot, t, cycleTheme, injectBuildTag, openSession }) {
   const panels = useStore((s) => s);
   const current = useSessions((s) => s.current);
   const currentBlank = useSessions((s) => {
     const c = s.current;
     return c !== undefined ? s.byId[c]?.blank !== false : false;
+  });
+  // Children are real sessions with parentId. Keep the parent as the tab root
+  // while a child is active, so selecting a subagent never loses the tab strip.
+  const conversationTabs = useSessions((s) => {
+    if (s.current === undefined) return { rootId: undefined, entries: [] };
+    const rootId = s.byId[s.current]?.parentId ?? s.current;
+    const catalog = s.subagentsByParent?.[rootId]?.entries ?? [];
+    const childIds = new Set(catalog.filter((entry) => entry.kind === "child").map((entry) => entry.id));
+    for (const [id, session] of Object.entries(s.byId)) {
+      if (session?.parentId === rootId) childIds.add(id);
+    }
+    const entries = [...childIds]
+      .map((id) => {
+        const catalogEntry = catalog.find((entry) => entry.kind === "child" && entry.id === id);
+        const session = s.byId[id];
+        if (session?.blank) return null;
+        return { id, label: session?.displayTitle ?? catalogEntry?.label ?? id, running: catalogEntry?.activity === "running" || session?.running === true };
+      })
+      .filter((entry) => entry !== null)
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return { rootId, entries };
   });
 
   // Narrow viewport: the nav shrinks to the stock 56px rail (collapsed mode).
@@ -236,6 +257,35 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
                 ✕
               </button>
             </div>
+            {conversationTabs.rootId !== undefined && conversationTabs.entries.length > 0 && (
+              <div className="bb-conversation-tabs" role="tablist" aria-label={t("drawer.conversationTabs")}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={current === conversationTabs.rootId}
+                  className={"bb-conversation-tab" + (current === conversationTabs.rootId ? " is-active" : "")}
+                  onClick={() => { actions.setDrawerTab("chat"); openSession?.(conversationTabs.rootId); }}
+                >
+                  <span className="bb-conversation-tab-kind">{t("drawer.mainSession")}</span>
+                  <span className="bb-conversation-tab-label">{t("drawer.chat")}</span>
+                </button>
+                {conversationTabs.entries.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={current === entry.id}
+                    className={"bb-conversation-tab" + (current === entry.id ? " is-active" : "")}
+                    title={entry.label}
+                    onClick={() => { actions.setDrawerTab("chat"); openSession?.(entry.id); }}
+                  >
+                    <span className="bb-conversation-tab-kind">{t("drawer.subagent")}</span>
+                    {entry.running && <span className="bb-conversation-tab-live" aria-label={t("act.running")} />}
+                    <span className="bb-conversation-tab-label">{entry.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="bb-drawer-pane" data-hidden={drawerTab !== "chat" || undefined}>
               {renderSlot("conversation", {})}
             </div>

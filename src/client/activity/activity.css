@@ -57,6 +57,66 @@
 .bb-drawer-close:hover { background: var(--bb-panel); color: var(--bb-text); }
 .bb-drawer-pane[data-hidden] { display: none; }
 
+/* Conversation switcher: parent and every healthy direct subagent are peers.
+   It scrolls rather than wrapping so the chat retains its vertical space. */
+.bb-conversation-tabs {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  border-bottom: 1px solid var(--bb-border);
+  background: var(--bb-panel);
+}
+.bb-conversation-tab {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 154px);
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--bb-border);
+  border-radius: 7px;
+  background: var(--bb-panel-2);
+  color: var(--bb-text-2);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s var(--bb-ease), background .15s var(--bb-ease), color .15s var(--bb-ease);
+}
+.bb-conversation-tab:hover { border-color: var(--bb-border-strong); background: var(--bb-panel); color: var(--bb-text); }
+.bb-conversation-tab:focus-visible { outline: 2px solid var(--bb-brand); outline-offset: 2px; }
+.bb-conversation-tab.is-active { border-color: var(--bb-brand); background: var(--bb-brand-soft); color: var(--bb-brand-strong); }
+.bb-conversation-tab-kind {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.bb-conversation-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; }
+.bb-conversation-tab-live {
+  width: 6px;
+  height: 6px;
+  margin-right: -3px;
+  border-radius: 50%;
+  background: var(--bb-col-running);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bb-col-running) 16%, transparent);
+  animation: bb-pulse 1.6s var(--bb-ease) infinite;
+}
+@media (max-width: 700px) {
+  .bb-conversation-tabs { padding-inline: 8px; }
+  .bb-conversation-tab { grid-template-columns: auto minmax(0, 116px); max-width: 168px; }
+}
+
 /* activity panel */
 .bb-act {
   flex: 1;
@@ -66,6 +126,41 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* main-session failure (LLM/API error) — full message, wraps, code chip */
+.bb-act-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--bb-col-failed);
+  border-radius: var(--bb-radius);
+  background: var(--bb-col-failed-soft);
+  color: var(--bb-col-failed);
+  font-size: 13px;
+  min-width: 0;
+}
+.bb-act-error-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.bb-act-error-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  color: var(--bb-text-2);
+}
+.bb-act-error-code {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--bb-panel);
+  border: 1px solid var(--bb-border);
+  color: var(--bb-text-3);
+  font-family: var(--bb-font-mono);
+  font-size: 11px;
 }
 .bb-act-banner {
   display: flex;
