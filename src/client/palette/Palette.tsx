@@ -1,18 +1,23 @@
 /** Palette — Ctrl+K session launcher, registered into 'shell.overlay'.
  * Opens via the global shortcut or the custom 'bb:palette-open' window event
  * (dispatched by the top-bar search trigger). */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-export function Palette({ useSessions, t, openSession }) {
+export function Palette({ useSessions, useWorkspaces, t, openSession }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
+  const dialogRef = useRef(null);
+  const previousFocus = useRef(null);
 
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setOpen((o) => !o);
+        setOpen((o) => {
+          if (!o) previousFocus.current = document.activeElement;
+          return !o;
+        });
         setQuery("");
         setSel(0);
       } else if (e.key === "Escape") {
@@ -20,6 +25,7 @@ export function Palette({ useSessions, t, openSession }) {
       }
     };
     const onOpenEvent = () => {
+      previousFocus.current = document.activeElement;
       setOpen(true);
       setQuery("");
       setSel(0);
@@ -32,12 +38,20 @@ export function Palette({ useSessions, t, openSession }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (open || previousFocus.current === null) return;
+    previousFocus.current.focus?.();
+    previousFocus.current = null;
+  }, [open]);
+
   const snap = useSessions((s) => s);
+  const archivedSessionIds = useWorkspaces((s) => s.archivedSessionIds);
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const archived = new Set(archivedSessionIds);
     const list = snap.ids
       .map((id) => snap.byId[id])
-      .filter((s) => s !== undefined && !s.blank);
+      .filter((s) => s !== undefined && !s.blank && !archived.has(s.id));
     const filtered = q
       ? list.filter((s) => s.displayTitle.toLowerCase().includes(q))
       : list;
@@ -46,7 +60,7 @@ export function Palette({ useSessions, t, openSession }) {
       label: s.displayTitle,
       sub: s.running ? t("pal.running") : s.completed ? t("pal.done") : t("pal.idle")
     }));
-  }, [query, snap, t]);
+  }, [query, snap, archivedSessionIds, t]);
 
   if (!open) return null;
 
@@ -57,11 +71,28 @@ export function Palette({ useSessions, t, openSession }) {
 
   return (
     <div className="bb-palette-backdrop" onMouseDown={() => setOpen(false)}>
-      <div className="bb-palette" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className="bb-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("search.placeholder")}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key !== "Tab") return;
+          const focusable = [...dialogRef.current.querySelectorAll("input, button:not([disabled])")];
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }}
+      >
         <input
           autoFocus
           className="bb-palette-input"
           placeholder={t("pal.placeholder")}
+          aria-label={t("pal.placeholder")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -70,11 +101,11 @@ export function Palette({ useSessions, t, openSession }) {
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              setSel((s) => Math.min(s + 1, items.length - 1));
+              if (items.length > 0) setSel((s) => Math.min(s + 1, items.length - 1));
             }
             if (e.key === "ArrowUp") {
               e.preventDefault();
-              setSel((s) => Math.max(s - 1, 0));
+              if (items.length > 0) setSel((s) => Math.max(s - 1, 0));
             }
             if (e.key === "Enter") {
               const item = items[sel];

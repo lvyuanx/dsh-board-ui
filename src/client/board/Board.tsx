@@ -8,14 +8,14 @@
  * Other interactions: workspace filter, right-click menu, inline rename,
  * drag-to-reorder within a column, blank-click drawer collapse, j/k keyboard
  * navigation. Each card shows ONE primary action plus a ⋯ menu. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   COLUMNS, buildColumns, agentStatsOf, childrenMapOf, relativeTime,
   workspaceViewsOf, workspaceIdOfSession, workspaceColorOf, filterSessionsByWorkspace
 } from "./columns";
 
-const MENU_NONE = { kind: null, id: null, x: 0, y: 0 };
+const MENU_NONE = { kind: null, id: null, x: 0, y: 0, trigger: null };
 const TASK_DRAG = "text/board-task";
 /** Stable empty-array fallback: persisted v2 store values may lack the
  * pausedIds field, but a `?? []` inside a selector would mint a fresh array
@@ -105,6 +105,12 @@ function AgentStatsRow({ running, done, waiting, failed, total, showBar, t }) {
  * 重试/查看错误 (any status), or the acceptance meta (已完成). */
 function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, onViewError }) {
   const lines = [];
+  const mainIssueText = mainError === null ? ""
+    : mainError.kind === "max-tokens" ? t("card.maxTokensHint")
+      : mainError.kind === "interrupted" ? t("card.interruptedHint")
+        : mainError.kind === "blocked" ? t("card.blockedHint")
+          : mainError.kind === "aborted" ? t("card.abortedHint")
+            : t("card.mainErrorHint", { message: mainError.message });
   if (status === "action_required") {
     const reason = session.pendingInteraction === "approval"
       ? t("card.reasonApproval")
@@ -123,7 +129,7 @@ function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, 
     lines.push(
       <div key="failed" className="bb-card-hint" data-kind="failed">
         <span aria-hidden>⚠</span>
-        <span className="bb-card-hint-msg">{failed > 0 ? t("card.failedHint", { n: failed }) : t("card.mainErrorHint", { message: mainError.message })}</span>
+        <span className="bb-card-hint-msg">{failed > 0 ? t("card.failedHint", { n: failed }) : mainIssueText}</span>
         <span className="bb-card-hint-actions">
           <button
             type="button"
@@ -155,7 +161,7 @@ function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, 
 
 /** Task card (plans + sessions share one anatomy): head → title → status
  * badge → hint → agent stats → progress → one primary action + ⋯ menu. */
-function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing, draft, primaryLabel, t, onOpen, onPrimary, onMenu, onStartRename, onDraft, onCommitRename, onDragStart, onRetry, onViewError }) {
+function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing, draft, primaryLabel, busy, t, onOpen, onPrimary, onMenu, onStartRename, onDraft, onCommitRename, onDragStart, onRetry, onViewError }) {
   const { session, status, acceptedAt, agentRunning, agentDone, agentWaiting, agentFailed, agentTotal, mainError } = item;
   if (editing) {
     return (
@@ -181,7 +187,10 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
       data-status={status}
       data-session={session.id}
       tabIndex={0}
-      draggable
+      role="group"
+      aria-label={session.displayTitle}
+      draggable={!busy}
+      aria-busy={busy || undefined}
       onDragStart={(e) => { onDragStart(e, session.id); }}
       onClick={onOpen}
       onDoubleClick={() => onStartRename()}
@@ -221,7 +230,7 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
         t={t}
       />
       <div className="bb-card-foot" draggable={false}>
-        <button type="button" className="bb-card-primary" onClick={(e) => { e.stopPropagation(); onPrimary(); }}>
+        <button type="button" className="bb-card-primary" disabled={busy} onClick={(e) => { e.stopPropagation(); onPrimary(); }}>
           {primaryLabel}
         </button>
         <button
@@ -229,6 +238,8 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
           className="bb-card-more"
           title={t("menu.more")}
           aria-label={t("menu.more")}
+          aria-haspopup="menu"
+          disabled={busy}
           onClick={(e) => { e.stopPropagation(); onMenu(e); }}
         >
           ⋯
@@ -251,10 +262,11 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
   const snap = useSessions((s) => s);
   const wsList = useWorkspaces((s) => s);
   const views = useMemo(() => workspaceViewsOf(wsList), [wsList]);
+  const archivedSessionIds = wsList.archivedSessionIds ?? EMPTY_IDS;
 
   const ids = useMemo(
-    () => filterSessionsByWorkspace(snap.ids, snap.byId, views, filter),
-    [snap.ids, snap.byId, views, filter]
+    () => filterSessionsByWorkspace(snap.ids, snap.byId, views, filter, archivedSessionIds),
+    [snap.ids, snap.byId, views, filter, archivedSessionIds]
   );
   const buckets = useMemo(
     () => buildColumns(ids, snap.byId, snap.jobsBySession, planningIds, snap.subagentsByParent, pausedIds, mainErrors, reviewPendingIds, acceptedIds, acceptedAtById),
@@ -264,11 +276,12 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
   // planning sessions (待执行 cards), newest activity first, grouped by
   // workspace and honoring the board filter
   const plans = useMemo(() => {
+    const archived = new Set(archivedSessionIds);
     return planningIds
       .map((id) => snap.byId[id])
-      .filter((s) => s !== undefined && !s.blank)
+      .filter((s) => s !== undefined && !s.blank && !archived.has(s.id))
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  }, [planningIds, snap.byId]);
+  }, [planningIds, snap.byId, archivedSessionIds]);
   const shownPlans = useMemo(() => {
     if (filter === null) return plans;
     return plans.filter((s) => workspaceIdOfSession(views, s.id) === filter);
@@ -379,9 +392,34 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     }
   }, [planningIds, snap]);
 
+  const [menu, setMenu] = useState(MENU_NONE);
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const busyRef = useRef(new Set());
+  const [operationError, setOperationError] = useState(null);
+  const dragId = useRef(null);
+  const taskDragId = useRef(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
+  const menuRef = useRef(null);
+  const boardRef = useRef(null);
+  const keyboardNav = useRef(false);
+
+  const closeMenu = (restoreFocus = false) => {
+    setMenu((currentMenu) => {
+      if (restoreFocus) currentMenu.trigger?.focus?.();
+      return MENU_NONE;
+    });
+  };
+
   useEffect(() => {
-    const onDown = () => setMenu(MENU_NONE);
-    const onKey = (e) => { if (e.key === "Escape") { setMenu(MENU_NONE); setEditing(null); } };
+    const onDown = () => closeMenu(false);
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        closeMenu(true);
+        setEditing(null);
+      }
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -390,23 +428,61 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     };
   }, []);
 
-  const [menu, setMenu] = useState(MENU_NONE);
-  const [editing, setEditing] = useState(null);
-  const [draft, setDraft] = useState("");
-  const dragId = useRef(null);
-  const taskDragId = useRef(null);
-  const [dragOverCol, setDragOverCol] = useState(null);
+  useLayoutEffect(() => {
+    if (menu.kind === null || menuRef.current === null) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const x = Math.max(8, Math.min(menu.x, window.innerWidth - rect.width - 8));
+    const y = Math.max(8, Math.min(menu.y, window.innerHeight - rect.height - 8));
+    if (x !== menu.x || y !== menu.y) {
+      setMenu((currentMenu) => ({ ...currentMenu, x, y }));
+      return;
+    }
+    menuRef.current.querySelector("button")?.focus();
+  }, [menu.kind, menu.x, menu.y]);
+
+  useEffect(() => {
+    if (!keyboardNav.current || focus === null) return;
+    keyboardNav.current = false;
+    const selector = '[data-session="' + CSS.escape(focus) + '"]';
+    const card = boardRef.current?.querySelector(selector);
+    card?.focus({ preventScroll: true });
+    card?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [focus]);
+
+  const runAction = async (id, label, run) => {
+    if (busyRef.current.has(id)) return;
+    busyRef.current.add(id);
+    setBusyIds((current) => new Set(current).add(id));
+    setOperationError(null);
+    try {
+      await run();
+    } catch (error) {
+      console.warn("board-ui: " + label + " failed:", error);
+      setOperationError({ id, label, message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      busyRef.current.delete(id);
+      setBusyIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const openMenu = (kind, id, event) => {
+    setMenu({ kind, id, x: event.clientX, y: event.clientY, trigger: event.currentTarget });
+  };
 
   const startRename = (item) => {
     setEditing(item.id);
     setDraft(item.session.title ?? item.session.displayTitle ?? "");
-    setMenu(MENU_NONE);
+    closeMenu(false);
   };
   const commitRename = (cancel) => {
     const id = editing;
     setEditing(null);
     if (cancel || id === null || draft.trim() === "") return;
-    renameSession(id, draft.trim()).catch(() => {});
+    void runAction(id, "rename", () => renameSession(id, draft.trim()));
   };
 
   const onDragStart = (e, id) => {
@@ -430,7 +506,7 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
       taskDragId.current = null;
       // dragging a plan onto 进行中 starts it (the lifecycle hop 待执行 → 进行中)
       if (colKey === "running") {
-        executePlan(planId).catch(() => {});
+        void runAction(planId, "execute", () => executePlan(planId));
       }
       return;
     }
@@ -445,13 +521,19 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     }
     const item = buckets[colKey].find((it) => it.id === id);
     if (item !== undefined && beforeId !== id) {
-      reorderSession(workspaceIdOfSession(views, id), id, beforeId).catch(() => {});
+      const workspaceId = workspaceIdOfSession(views, id);
+      if (workspaceId === "") {
+        setOperationError({ id, label: "reorder", message: t("error.ungroupedReorder") });
+      } else {
+        void runAction(id, "reorder", () => reorderSession(workspaceId, id, beforeId));
+      }
     }
   };
 
   const flat = STATUS_COLUMNS.flatMap((c) => buckets[c.key]);
   const navList = [...shownPlans.map((s) => ({ id: s.id, kind: "plan" })), ...flat.map((it) => ({ id: it.id, kind: "session" }))];
   const onKeyDown = (e) => {
+    if (e.target instanceof Element && e.target.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
     if (e.key !== "j" && e.key !== "k" && e.key !== "Enter") return;
     if (navList.length === 0) return;
     const idx = navList.findIndex((item) => item.id === focus);
@@ -460,6 +542,7 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     if (e.key === "k") next = idx === -1 ? 0 : Math.max(idx - 1, 0);
     if (next !== idx) {
       e.preventDefault();
+      keyboardNav.current = true;
       actions.setFocus(navList[next].id);
     } else if (e.key === "Enter" && idx !== -1) {
       openSession(navList[idx].id);
@@ -470,8 +553,9 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     <button
       key={label}
       type="button"
+      role="menuitem"
       className={"bb-menu-item" + (danger ? " is-danger" : "")}
-      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      onClick={onClick}
     >
       {label}
     </button>
@@ -489,17 +573,17 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     // Latch review first so viewing the result cannot imply acceptance.
     if (buckets.reviewing.some((item) => item.id === id)) actions.markReviewPending(id);
     actions.setFocus(id);
-    openSession(id);
+    openSession(id, planningIds.includes(id));
   };
 
   // One primary action per status (section 十六); the rest live in ⋯.
   const primaryOf = (item) => {
     const id = item.id;
-    if (item.status === "running") return { label: t("task.pause"), run: () => pauseSession(id).catch((err) => console.warn("board-ui: pause failed:", err)) };
-    if (item.status === "paused") return { label: t("task.resume"), run: () => resumeSession(id).catch((err) => console.warn("board-ui: resume failed:", err)) };
+    if (item.status === "running") return { label: t("task.pause"), run: () => void runAction(id, "pause", () => pauseSession(id)) };
+    if (item.status === "paused") return { label: t("task.resume"), run: () => void runAction(id, "resume", () => resumeSession(id)) };
     if (item.status === "action_required") return { label: t("task.handle"), run: () => openFrom(id) };
     if (item.status === "reviewing") return { label: t("task.accept"), run: () => acceptSession(id) };
-    if (item.status === "failed") return { label: t("task.restart"), run: () => retrySession(id).catch((err) => console.warn("board-ui: retry failed:", err)) };
+    if (item.status === "failed") return { label: t("task.restart"), run: () => void runAction(id, "retry", () => retrySession(id)) };
     return { label: t("task.viewResult"), run: () => openFrom(id) };
   };
 
@@ -508,34 +592,34 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     const items = [];
     if (item.status === "running" || item.status === "paused") {
       items.push(
-        { label: t("menu.open"), run: () => { setMenu(MENU_NONE); openSession(id); } },
-        { label: t("task.viewDetails"), run: () => { setMenu(MENU_NONE); openActivity(id); } }
+        { label: t("menu.open"), run: () => { closeMenu(false); openSession(id); } },
+        { label: t("task.viewDetails"), run: () => { closeMenu(false); openActivity(id); } }
       );
     } else if (item.status === "action_required") {
-      items.push({ label: t("task.viewReason"), run: () => { setMenu(MENU_NONE); openActivity(id); } });
+      items.push({ label: t("task.viewReason"), run: () => { closeMenu(false); openActivity(id); } });
     } else if (item.status === "reviewing") {
       items.push(
-        { label: t("task.viewReview"), run: () => { setMenu(MENU_NONE); openFrom(id); } },
-        { label: t("task.reviewAgain"), run: () => { setMenu(MENU_NONE); reVerifySession(id).catch((err) => console.warn("board-ui: re-review failed:", err)); } }
+        { label: t("task.viewReview"), run: () => { closeMenu(false); openFrom(id); } },
+        { label: t("task.reviewAgain"), run: () => { closeMenu(false); void runAction(id, "re-review", () => reVerifySession(id)); } }
       );
     } else if (item.status === "failed") {
       items.push(
-        { label: t("task.restart"), run: () => { setMenu(MENU_NONE); retrySession(id).catch((err) => console.warn("board-ui: retry failed:", err)); } },
-        { label: t("task.viewError"), run: () => { setMenu(MENU_NONE); openActivity(id); } }
+        { label: t("task.restart"), run: () => { closeMenu(false); void runAction(id, "retry", () => retrySession(id)); } },
+        { label: t("task.viewError"), run: () => { closeMenu(false); openActivity(id); } }
       );
     } else {
-      items.push({ label: t("task.reRun"), run: () => { setMenu(MENU_NONE); reRunSession(id).catch((err) => console.warn("board-ui: re-run failed:", err)); } });
+      items.push({ label: t("task.reRun"), run: () => { closeMenu(false); void runAction(id, "re-run", () => reRunSession(id)); } });
     }
     items.push(
-      { label: t("menu.rename"), run: () => { const it = flat.find((x) => x.id === id); setMenu(MENU_NONE); if (it) startRename(it); } },
-      { label: t("menu.fork"), run: () => { setMenu(MENU_NONE); forkSession(id); } },
-      { label: t("menu.archive"), run: () => { setMenu(MENU_NONE); archiveSession(id).catch(() => {}); }, danger: true }
+      { label: t("menu.rename"), run: () => { const it = flat.find((x) => x.id === id); closeMenu(false); if (it) startRename(it); } },
+      { label: t("menu.fork"), run: () => { closeMenu(false); void runAction(id, "fork", () => forkSession(id)); } },
+      { label: t("menu.archive"), run: () => { closeMenu(false); void runAction(id, "archive", () => archiveSession(id)); }, danger: true }
     );
     return items;
   };
 
   return (
-    <div className="bb-board-root" onKeyDown={onKeyDown} onClick={onBlankClick}>
+    <div ref={boardRef} className="bb-board-root" onKeyDown={onKeyDown} onClick={onBlankClick}>
       <div className="bb-board-head">
         <span className="bb-board-title">{t("board.title")}</span>
         <span className="bb-board-sub">{t("board.sub")}</span>
@@ -552,6 +636,13 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
         </select>
       </div>
 
+      {operationError !== null && (
+        <div className="bb-operation-error" role="alert">
+          <span>{t("error.action", { action: operationError.label, message: operationError.message })}</span>
+          <button type="button" aria-label={t("error.dismiss")} onClick={() => setOperationError(null)}>×</button>
+        </div>
+      )}
+
       <div className="bb-cols">
         {/* 待执行 — plans only, nothing executes until started */}
         <section className="bb-col bb-col-pending" data-col="pending">
@@ -564,7 +655,7 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
               </div>
               <span className="bb-col-sub">{t("col.pending.sub")}</span>
             </div>
-            <button type="button" className="bb-pool-add" title={t("pool.add")} onClick={() => startTaskPlanning().catch((err) => console.warn("board-ui: start planning failed:", err))}>+</button>
+            <button type="button" className="bb-pool-add" title={t("pool.add")} aria-label={t("pool.add")} disabled={busyIds.has("__new__")} onClick={() => void runAction("__new__", "start planning", startTaskPlanning)}>+</button>
           </div>
           <div className="bb-col-cards">
             {shownPlans.length === 0 && <div className="bb-col-empty">{t("pool.empty")}</div>}
@@ -581,17 +672,18 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
                   editing={editing === session.id}
                   draft={draft}
                   primaryLabel={t("task.execute")}
+                  busy={busyIds.has(session.id)}
                   t={t}
                   wsColor={workspaceColorOf(views, workspaceIdOfSession(views, session.id))}
                   wsTitle={wsTitleOf(workspaceIdOfSession(views, session.id))}
                   onOpen={() => openFrom(session.id)}
-                  onPrimary={() => executePlan(session.id).catch((err) => console.warn("board-ui: execute plan failed:", err))}
-                  onMenu={(e) => setMenu({ kind: "plan", id: session.id, x: e.clientX, y: e.clientY })}
+                  onPrimary={() => void runAction(session.id, "execute", () => executePlan(session.id))}
+                  onMenu={(e) => openMenu("plan", session.id, e)}
                   onStartRename={() => startRename(item)}
                   onDraft={setDraft}
                   onCommitRename={commitRename}
                   onDragStart={onPlanDragStart}
-                  onRetry={() => retrySession(session.id).catch((err) => console.warn("board-ui: retry failed:", err))}
+                  onRetry={() => void runAction(session.id, "retry", () => retrySession(session.id))}
                   onViewError={() => openActivity(session.id)}
                 />
               );
@@ -634,17 +726,18 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
                       editing={editing === item.id}
                       draft={draft}
                       primaryLabel={primary.label}
+                      busy={busyIds.has(item.id)}
                       t={t}
                       wsColor={workspaceColorOf(views, workspaceIdOfSession(views, item.id))}
                       wsTitle={wsTitleOf(workspaceIdOfSession(views, item.id))}
                       onOpen={() => openFrom(item.id)}
                       onPrimary={primary.run}
-                      onMenu={(e) => setMenu({ kind: "session", id: item.id, x: e.clientX, y: e.clientY })}
+                      onMenu={(e) => openMenu("session", item.id, e)}
                       onStartRename={() => startRename(item)}
                       onDraft={setDraft}
                       onCommitRename={commitRename}
                       onDragStart={onDragStart}
-                      onRetry={() => retrySession(item.id).catch((err) => console.warn("board-ui: retry failed:", err))}
+                      onRetry={() => void runAction(item.id, "retry", () => retrySession(item.id))}
                       onViewError={() => openActivity(item.id)}
                     />
                   );
@@ -656,11 +749,11 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
       </div>
 
       {menu.kind !== null && (
-        <div className="bb-menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
+        <div ref={menuRef} className="bb-menu" role="menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
           {menu.kind === "plan" ? (
             <div>
-              {menuItem(t("pool.open"), () => { setMenu(MENU_NONE); openSession(menu.id); })}
-              {menuItem(t("pool.unplan"), () => { setMenu(MENU_NONE); actions.unmarkPlanning(menu.id); }, true)}
+              {menuItem(t("pool.open"), () => { closeMenu(false); openSession(menu.id, true); })}
+              {menuItem(t("pool.unplan"), () => { closeMenu(false); actions.unmarkPlanning(menu.id); }, true)}
             </div>
           ) : (
             <div>

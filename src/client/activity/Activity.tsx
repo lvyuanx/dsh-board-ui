@@ -21,20 +21,23 @@ export function ActivityPanel({ sessionId, useSessions, t, switchToChat, mainErr
   // conversation's last closed turn. The window loads asynchronously, so poll
   // briefly after mount (same pattern as the board's openSession sync).
   const [mainError, setMainError] = useState(null);
+  const [, setClock] = useState(0);
   useEffect(() => {
+    setMainError(null);
     if (mainErrorOf === undefined) return;
     let cancelled = false;
     let tries = 0;
+    let timer;
     const check = () => {
       if (cancelled) return;
       const err = mainErrorOf(sessionId);
       if (err === undefined) {
-        if (tries++ < 40) setTimeout(check, 100);
+        if (tries++ < 40) timer = setTimeout(check, 100);
         return;
       }
       setMainError(err);
     };
-    const timer = setTimeout(check, 150);
+    timer = setTimeout(check, 150);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [sessionId, mainErrorOf]);
 
@@ -47,6 +50,17 @@ export function ActivityPanel({ sessionId, useSessions, t, switchToChat, mainErr
   // "question") — any defined value means the session is blocked on the user.
   const pending = snap.byId[sessionId]?.pendingInteraction !== undefined;
   const live = jobs.filter((j) => j.status === "running" || j.status === "stopping").length;
+  useEffect(() => {
+    if (live === 0) return;
+    const timer = setInterval(() => setClock((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [live]);
+
+  const mainIssueText = mainError?.kind === "max-tokens" ? t("act.maxTokens")
+    : mainError?.kind === "interrupted" ? t("act.interrupted")
+      : mainError?.kind === "blocked" ? t("act.blocked")
+        : mainError?.kind === "aborted" ? t("act.aborted")
+          : mainError?.message;
 
   return (
     <div className="bb-act">
@@ -56,7 +70,7 @@ export function ActivityPanel({ sessionId, useSessions, t, switchToChat, mainErr
             <span aria-hidden>⚠</span>
             <span>{t("act.mainError")}</span>
           </div>
-          <div className="bb-act-error-msg">{mainError.message}</div>
+          <div className="bb-act-error-msg">{mainIssueText}</div>
           {mainError.code !== void 0 && <code className="bb-act-error-code">{mainError.code}</code>}
         </div>
       )}

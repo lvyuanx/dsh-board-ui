@@ -211,5 +211,5 @@
 .bb-act-dot.fail { background: var(--bb-col-failed); }
 .bb-act-kind { flex: none; font-family: var(--bb-font-mono); font-size: 11px; color: var(--bb-text-3); }
 .bb-act-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bb-act-detail { flex: none; font-size: 11.5px; color: var(--bb-text-3); }
+.bb-act-detail { flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--bb-text-3); }
 .bb-act-empty { padding: 26px 10px; text-align: center; color: var(--bb-text-3); font-size: 12.5px; }

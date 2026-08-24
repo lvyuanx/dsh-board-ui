@@ -174,6 +174,7 @@
   border-left: 1px solid var(--bb-border);
   box-shadow: -16px 0 40px rgba(16, 24, 40, 0.16);
   z-index: 30;
+  max-width: 100%;
   overflow: hidden;
   transform: translateX(105%);
   pointer-events: none;
@@ -193,7 +194,9 @@
   transition: background 0.12s var(--bb-ease);
 }
 .bb-drawer-handle:hover,
+.bb-drawer-handle:focus-visible,
 .bb-drawer-handle[data-dragging] { background: var(--bb-brand); opacity: 0.55; }
+.bb-drawer-handle:focus-visible { outline: 2px solid var(--bb-brand); outline-offset: 1px; }
 
 .bb-drawer-inner {
   flex: 1;
@@ -205,9 +208,34 @@
 .bb-details {
   flex: none;
   width: 0;
+  max-width: 45%;
   overflow: hidden;
   background: var(--bb-panel-2);
   border-left: 1px solid var(--bb-border);
 }
+.bb-details[data-hidden] { display: none; }
+.bb-details[data-overlay] {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100% !important;
+  max-width: none;
+}
 .bb-overlay-host { position: absolute; inset: 0; pointer-events: none; z-index: 60; }
 .bb-overlay-host > * { pointer-events: auto; }
+
+@media (max-width: 700px) {
+  .bb-topbar { gap: 6px; padding-inline: 8px; }
+  .bb-build-tag { display: none; }
+  .bb-switcher { margin-left: 0; }
+  .bb-switcher-label { max-width: 72px; }
+  .bb-search {
+    flex: 0 0 32px;
+    width: 32px;
+    padding: 0;
+    margin-left: auto;
+    justify-content: center;
+  }
+  .bb-search > span:not(:first-child), .bb-search kbd { display: none; }
+  .bb-theme-btn { max-width: 58px; padding-inline: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

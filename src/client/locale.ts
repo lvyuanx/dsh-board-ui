@@ -3,7 +3,7 @@
 export const zh = {
   "board.title": "任务看板",
   "board.sub": "点击卡片打开任务详情",
-  // columns — the five lifecycle states (counts = task counts)
+  // columns — the six lifecycle states (counts = task counts)
   "col.pending": "待执行",
   "col.pending.sub": "等待 Agent 开始执行",
   "col.running": "进行中",
@@ -32,6 +32,10 @@ export const zh = {
   "card.acceptedMeta": "验收通过 · {time}",
   "card.failedHint": "{n} 个 Agent 执行失败",
   "card.mainErrorHint": "主会话执行失败：{message}",
+  "card.maxTokensHint": "主会话输出达到 token 上限，需要继续执行",
+  "card.interruptedHint": "主会话执行被意外中断",
+  "card.blockedHint": "主会话执行已阻塞",
+  "card.abortedHint": "主会话执行已停止",
   // sub-agent stats — marks only, never avatars
   "card.subagents": "子 Agent",
   "card.agentsRunning": "运行中",
@@ -88,12 +92,20 @@ export const zh = {
   "menu.archive": "归档",
   "drawer.chat": "对话",
   "drawer.activity": "活动",
+  "drawer.tabs": "任务面板",
+  "drawer.panel": "任务详情",
+  "drawer.details": "工具详情",
+  "drawer.resize": "调整任务面板宽度",
   "drawer.close": "收起面板",
   "drawer.conversationTabs": "会话标签",
   "drawer.mainSession": "主对话",
   "drawer.subagent": "子代理",
   "act.pending": "这个会话在等你处理（审批或提问）",
-  "act.mainError": "主会话执行失败",
+  "act.mainError": "主会话执行异常",
+  "act.maxTokens": "回答达到输出 token 上限，请回到对话继续执行。",
+  "act.interrupted": "执行被意外中断，可以检查上下文后重试。",
+  "act.blocked": "执行处于阻塞状态，需要检查对话中的待处理事项。",
+  "act.aborted": "执行已停止，可以从当前上下文继续。",
   "act.backToChat": "回到对话",
   "act.jobs": "后台任务",
   "act.noJobs": "没有后台任务",
@@ -101,13 +113,16 @@ export const zh = {
   "act.noSubagents": "没有子代理",
   "act.running": "运行中",
   "act.subagentFailed": "子代理失败",
-  "act.nothing": "暂无活动"
+  "act.nothing": "暂无活动",
+  "error.action": "{action} 失败：{message}",
+  "error.dismiss": "关闭错误提示",
+  "error.ungroupedReorder": "未分组会话不能按工作区排序"
 };
 
 export const en = {
   "board.title": "Task Board",
   "board.sub": "Click a card to open task details",
-  // columns — the five lifecycle states (counts = task counts)
+  // columns — the six lifecycle states (counts = task counts)
   "col.pending": "Pending",
   "col.pending.sub": "Waiting for an agent to start",
   "col.running": "Running",
@@ -136,6 +151,10 @@ export const en = {
   "card.acceptedMeta": "Accepted · {time}",
   "card.failedHint": "{n} agents failed",
   "card.mainErrorHint": "Main session failed: {message}",
+  "card.maxTokensHint": "The main session reached its output token limit and needs to continue",
+  "card.interruptedHint": "The main session was interrupted unexpectedly",
+  "card.blockedHint": "The main session is blocked",
+  "card.abortedHint": "The main session was stopped",
   // sub-agent stats — marks only, never avatars
   "card.subagents": "Subagents",
   "card.agentsRunning": "running",
@@ -192,12 +211,20 @@ export const en = {
   "menu.archive": "Archive",
   "drawer.chat": "Chat",
   "drawer.activity": "Activity",
+  "drawer.tabs": "Task panel",
+  "drawer.panel": "Task details",
+  "drawer.details": "Tool details",
+  "drawer.resize": "Resize task panel",
   "drawer.close": "Collapse panel",
   "drawer.conversationTabs": "Conversation tabs",
   "drawer.mainSession": "Main chat",
   "drawer.subagent": "Subagent",
   "act.pending": "This session needs you (approval or question)",
-  "act.mainError": "Main session failed",
+  "act.mainError": "Main session issue",
+  "act.maxTokens": "The reply reached its output token limit. Return to chat to continue.",
+  "act.interrupted": "Execution was interrupted unexpectedly. Check the context before retrying.",
+  "act.blocked": "Execution is blocked. Check the pending item in chat.",
+  "act.aborted": "Execution was stopped and can continue from the current context.",
   "act.backToChat": "Back to chat",
   "act.jobs": "Background jobs",
   "act.noJobs": "No background jobs",
@@ -205,5 +232,8 @@ export const en = {
   "act.noSubagents": "No subagents",
   "act.running": "running",
   "act.subagentFailed": "Subagent failed",
-  "act.nothing": "Nothing here yet"
+  "act.nothing": "Nothing here yet",
+  "error.action": "{action} failed: {message}",
+  "error.dismiss": "Dismiss error",
+  "error.ungroupedReorder": "Ungrouped sessions cannot be reordered within a workspace"
 };

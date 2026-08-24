@@ -26,11 +26,11 @@ import { BoardFrame } from "./frame/BoardFrame";
 import { Board } from "./board/Board";
 import { Palette } from "./palette/Palette";
 import { ActivityPanel } from "./activity/Activity";
-import { planStartedInConversation } from "./board/columns";
+import { mainIssueOfTurns, planStartedInConversation } from "./board/columns";
 import { zh, en } from "./locale";
 
 /** Re-exported for unit tests (pure column logic). */
-export { buildColumns, columnOf, cardStatusOf, taskStatusOf, planStartedInConversation, workspaceViewsOf, workspaceIdOfSession, workspaceColorOf } from "./board/columns";
+export { buildColumns, columnOf, cardStatusOf, taskStatusOf, planStartedInConversation, toolCallStartsExecution, mainIssueOfTurns, filterSessionsByWorkspace, workspaceViewsOf, workspaceIdOfSession, workspaceColorOf } from "./board/columns";
 
 /** Build stamp shown in the top bar (confirms which bundle is running). */
 export const BUILD_TAG = typeof __BOARD_UI_BUILD__ === "string" ? __BOARD_UI_BUILD__ : "dev";
@@ -168,7 +168,7 @@ function createBoardStore() {
       // land in 失败 instead of 已完成. Value: {message, code?}.
       setMainError: (d, id, err) => {
         const cur = d.mainErrors ?? {};
-        if (cur[id] !== void 0 && cur[id].message === err.message && cur[id].code === err.code) return;
+        if (cur[id] !== void 0 && cur[id].kind === err.kind && cur[id].message === err.message && cur[id].code === err.code) return;
         d.mainErrors = { ...cur, [id]: err };
       },
       clearMainError: (d, id) => {
@@ -389,17 +389,9 @@ export function apply(ctx) {
     const chat = session.conversation?.snapshot("chat");
     const turns = chat?.timeline?.turns;
     if (turns === void 0 || turns.size === 0) return undefined;
-    // the LAST CLOSED turn — an in-flight turn has no end yet and must not
-    // clear a recorded failure (or mask a fresh one) while it runs
-    const closed = [...turns.values()].filter((t) => t?.end !== void 0).sort((a, b) => b.turn - a.turn);
-    if (closed.length === 0) return undefined;
-    const reason = closed[0].end?.data?.reason;
-    if (reason?.kind !== "error") return null;
-    const failure = reason.error ?? {};
-    return {
-      message: typeof failure.message === "string" && failure.message !== "" ? failure.message : "turn failed",
-      ...failure.code !== void 0 ? { code: failure.code } : {}
-    };
+    // The last closed turn is authoritative. Non-completed terminal reasons
+    // are issues too; max-token/interrupted/aborted tasks must not look done.
+    return mainIssueOfTurns(turns.values());
   };
   ctx.slots.register({
     name: "board",
@@ -407,7 +399,7 @@ export function apply(ctx) {
     store: createBoardStore,
     inject: (boardActions) => {
       const face = {
-      openSession: (id) => {
+      openSession: (id, checkPlanning = false) => {
         frameActions?.setDrawerOpen(true);
         ctx.sessions.open(id);
         // Main-session failure sync: the conversation window loads
@@ -432,8 +424,7 @@ export function apply(ctx) {
         // non-read-only tool before this page loaded the history. Poll the
         // pure check briefly after open so such plans leave 待执行 promptly
         // instead of lingering as "finished tasks in the wrong column".
-        const isPlan = (boardActions.getSnapshot().planningIds ?? []).includes(id);
-        if (isPlan) {
+        if (checkPlanning) {
           let tries = 0;
           const check = () => {
             if (tries++ >= 30) return;
@@ -452,10 +443,10 @@ export function apply(ctx) {
         const result = await session.rename(title);
         if (!result.ok) throw new Error(result.error?.message ?? "rename failed");
       },
-      forkSession: (id) => {
-        ctx.sessions.fork({ sessionId: id, increaseTitle: true }).then((childId) => {
-          ctx.sessions.open(childId);
-        }).catch(() => {});
+      forkSession: async (id) => {
+        const childId = await ctx.sessions.fork({ sessionId: id, increaseTitle: true });
+        frameActions?.setDrawerOpen(true);
+        ctx.sessions.open(childId);
       },
       archiveSession: async (id) => {
         await ctx.workspaces.archiveSession(id);
@@ -470,8 +461,8 @@ export function apply(ctx) {
         frameActions?.setDrawerOpen(true);
       },
       executePlan: async (sessionId) => {
-        boardActions.unmarkPlanning(sessionId);
         await promptNewSession(sessionId, EXECUTE_PROMPT);
+        boardActions.unmarkPlanning(sessionId);
       },
       // ⏸ 暂停 — a real session.cancel() (the running turn stops, queued work
       // stays parked in FIFO) plus a client-side mark that keeps the card in
@@ -487,23 +478,23 @@ export function apply(ctx) {
         }
       },
       resumeSession: async (sessionId) => {
-        boardActions.unmarkPaused(sessionId);
         await promptSession(sessionId, "请继续执行。");
+        boardActions.unmarkPaused(sessionId);
       },
       acceptSession: (sessionId) => {
         boardActions.acceptReview(sessionId);
       },
-      reVerifySession: (sessionId) => {
+      reVerifySession: async (sessionId) => {
+        await promptSession(sessionId, RE_VERIFY_PROMPT);
         boardActions.clearReviewDecision(sessionId);
-        return promptSession(sessionId, RE_VERIFY_PROMPT);
       },
-      reRunSession: (sessionId) => {
+      reRunSession: async (sessionId) => {
+        await promptSession(sessionId, RE_RUN_PROMPT);
         boardActions.clearReviewDecision(sessionId);
-        return promptSession(sessionId, RE_RUN_PROMPT);
       },
-      retrySession: (sessionId) => {
+      retrySession: async (sessionId) => {
+        await promptSession(sessionId, RETRY_PROMPT);
         boardActions.clearReviewDecision(sessionId);
-        return promptSession(sessionId, RETRY_PROMPT);
       },
       openActivity: (sessionId) => {
         frameActions?.setDrawerOpen(true);

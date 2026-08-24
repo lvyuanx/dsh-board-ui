@@ -28,6 +28,8 @@
   box-shadow: var(--bb-shadow-pop);
   display: flex;
   flex-direction: column;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 .bb-menu-item {
   display: block;
@@ -68,4 +70,8 @@
   border-color: var(--bb-brand);
   background: var(--bb-brand-soft);
   box-shadow: 0 0 0 3px var(--bb-brand-soft);
+}
+
+@media (max-width: 700px) {
+  .bb-filter { max-width: 132px; }
 }

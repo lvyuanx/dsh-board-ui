@@ -34,3 +34,4 @@ temp/
 # 注意：lib/ 刻意不忽略 —— 插件运行时直接从 lib/ 消费（link 进 ~/.dsh/profiles/web），
 # 提交构建产物可让仓库 clone 后开箱即用，无需先执行构建。
 # lib/*.map
+.context/

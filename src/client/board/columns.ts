@@ -223,11 +223,15 @@ export const WORKSPACE_COLORS = [
   "#6b7280"
 ];
 
-/** Workspace accent color, stable by the workspace's position in the list. */
+/** Workspace accent color, stable across workspace reordering. */
 export function workspaceColorOf(views, workspaceId) {
-  const idx = views.findIndex((v) => v.workspaceId === workspaceId);
-  if (idx === -1) return "var(--bb-text-3)";
-  return WORKSPACE_COLORS[idx % WORKSPACE_COLORS.length];
+  if (!views.some((v) => v.workspaceId === workspaceId)) return "var(--bb-text-3)";
+  let hash = 2166136261;
+  for (const ch of String(workspaceId)) {
+    hash ^= ch.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return WORKSPACE_COLORS[(hash >>> 0) % WORKSPACE_COLORS.length];
 }
 
 /** Workspace owning a session; "" means ungrouped (no workspace claims it). */
@@ -239,11 +243,12 @@ export function workspaceIdOfSession(views, sessionId) {
   return "";
 }
 
-/** Apply the workspace filter to the flat session id list. */
-export function filterSessionsByWorkspace(ids, byId, views, filter) {
-  if (filter == null) return ids;
+/** Apply archive visibility and the workspace filter to a flat session id list. */
+export function filterSessionsByWorkspace(ids, byId, views, filter, archivedSessionIds = []) {
+  const archived = new Set(archivedSessionIds);
+  if (filter == null) return ids.filter((id) => !archived.has(id));
   const allowed = new Set(views.find((v) => v.workspaceId === filter)?.sessionIds ?? []);
-  return ids.filter((id) => allowed.has(id));
+  return ids.filter((id) => !archived.has(id) && allowed.has(id));
 }
 
 /** Compact relative time for a card footer. */
@@ -266,7 +271,97 @@ export const START_RE = /^(开始执行|开始任务|执行计划|执行吧|开�
 /** Read-only inspection tools a planning conversation may legitimately use;
  * any OTHER tool call means the session is actually executing work (非plan) —
  * it leaves the 待执行 column and flows into the normal status columns. */
-export const READ_ONLY_TOOLS = new Set(["read", "read_image", "grep", "glob", "web_search", "skill", "list_agents", "get_goal", "job_list", "job_output"]);
+export const READ_ONLY_TOOLS = new Set([
+  "read", "read_image", "view_image", "grep", "glob", "web_search", "fetch", "skill",
+  "list_agents", "get_goal", "job_list", "job_output"
+]);
+
+/** Remove quoted strings and comments before scanning wrapper source. This is
+ * deliberately a lexer, not a JS parser; template interpolation stays opaque
+ * and therefore takes the conservative execution path. */
+function executableCodeOnly(source) {
+  let output = "";
+  let mode = "code";
+  let opaque = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (mode === "code") {
+      if (ch === "/" && next === "/") { mode = "line-comment"; output += "  "; i += 1; continue; }
+      if (ch === "/" && next === "*") { mode = "block-comment"; output += "  "; i += 1; continue; }
+      if (ch === "'") { mode = "single"; output += " "; continue; }
+      if (ch === '"') { mode = "double"; output += " "; continue; }
+      if (ch.charCodeAt(0) === 96) { mode = "template"; output += " "; continue; }
+      output += ch;
+      continue;
+    }
+    if (mode === "line-comment") {
+      if (ch === "\n") { mode = "code"; output += "\n"; } else output += " ";
+      continue;
+    }
+    if (mode === "block-comment") {
+      if (ch === "*" && next === "/") { mode = "code"; output += "  "; i += 1; }
+      else output += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+    if (ch === "\\") { output += "  "; i += 1; continue; }
+    if (mode === "template" && ch === "$" && next === "{") opaque = true;
+    const closes = mode === "single" ? ch === "'" : mode === "double" ? ch === '"' : ch.charCodeAt(0) === 96;
+    if (closes) mode = "code";
+    output += ch === "\n" ? "\n" : " ";
+  }
+  return { source: output, opaque: opaque || mode !== "code" };
+}
+
+/** Whether one tool call proves execution has started. run_code is a wrapper in
+ * current Harness builds, so inspect its explicit nested tool calls instead of
+ * treating every read-only wrapper as a write. Dynamic/opaque code stays
+ * conservative and counts as execution. */
+export function toolCallStartsExecution(block, readOnlyTools = READ_ONLY_TOOLS) {
+  if (block?.kind !== "tool-call" || typeof block.name !== "string" || block.name === "") return false;
+  if (readOnlyTools.has(block.name)) return false;
+  if (block.name !== "run_code") return true;
+  let code;
+  try {
+    const args = JSON.parse(block.argsRaw ?? "");
+    code = typeof args?.code === "string" ? args.code : undefined;
+  } catch {
+    return true;
+  }
+  if (code === undefined) return true;
+  const executable = executableCodeOnly(code);
+  if (executable.opaque) return true;
+  const nested = [];
+  const callRe = /tools(?:\.([A-Za-z_$][\w$]*)|\[\s*["']([^"']+)["']\s*\])\s*\(/g;
+  for (const match of executable.source.matchAll(callRe)) nested.push(match[1] ?? match[2]);
+  return nested.length === 0 || nested.some((name) => !readOnlyTools.has(name));
+}
+
+/** Fold the last closed turn into the board's persisted main-session issue.
+ * undefined means no closed turn is loaded; null means a clean completion. */
+export function mainIssueOfTurns(turns) {
+  if (turns === undefined || turns === null) return undefined;
+  const closed = [...turns].filter((turn) => turn?.end !== undefined).sort((a, b) => (b.turn ?? 0) - (a.turn ?? 0));
+  if (closed.length === 0) return undefined;
+  const reason = closed[0].end?.data?.reason;
+  if (reason?.kind === "completed") return null;
+  if (reason?.kind === "error") {
+    const failure = reason.error ?? {};
+    return {
+      kind: "error",
+      message: typeof failure.message === "string" && failure.message !== "" ? failure.message : "turn failed",
+      ...(failure.code !== undefined ? { code: failure.code } : {})
+    };
+  }
+  if (reason?.kind === "max-tokens") return { kind: "max-tokens", code: "max-tokens", message: "output token limit reached" };
+  if (reason?.kind === "interrupted") return { kind: "interrupted", code: "interrupted", message: "execution was interrupted" };
+  if (reason?.kind === "blocked") return { kind: "blocked", code: "blocked", message: "execution is blocked" };
+  if (reason?.kind === "aborted") {
+    const cause = reason.reason?.kind ?? "unknown";
+    return { kind: "aborted", code: "aborted:" + cause, message: cause === "user" ? "execution was stopped" : "execution was aborted" };
+  }
+  return { kind: "unknown", code: reason?.kind ?? "unknown", message: "execution ended unexpectedly" };
+}
 
 /** Did a planning conversation actually START executing? Two real signals,
  * read off the runtime conversation nodes (ConversationNode shapes):
@@ -286,7 +381,7 @@ export function planStartedInConversation(nodes, readOnlyTools = READ_ONLY_TOOLS
   if (START_RE.test(text)) return true;
   for (const node of nodes) {
     if (node.kind !== "assistant" || !Array.isArray(node.blocks)) continue;
-    if (node.blocks.some((b) => b?.kind === "tool-call" && typeof b.name === "string" && b.name !== "" && !readOnlyTools.has(b.name))) return true;
+    if (node.blocks.some((block) => toolCallStartsExecution(block, readOnlyTools))) return true;
   }
   return false;
 }

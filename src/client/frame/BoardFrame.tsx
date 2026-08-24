@@ -17,9 +17,25 @@ const NAV_DEFAULT = 280;
 const DRAWER_MIN = 420;
 const DRAWER_MAX = 1100;
 
+function handleTabListKeyDown(e) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+  const tabs = [...e.currentTarget.children].filter((element) => element.getAttribute("role") === "tab");
+  if (tabs.length === 0) return;
+  const index = Math.max(0, tabs.indexOf(document.activeElement));
+  const next = e.key === "Home" ? 0
+    : e.key === "End" ? tabs.length - 1
+      : e.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length
+        : (index + 1) % tabs.length;
+  e.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
+}
+
 /** Topbar workspace switcher (tower.im-style project dropdown). */
 function WorkspaceSwitcher({ filter, onFilterChange, views, t }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef(null);
+  const menuRef = useRef(null);
   useEffect(() => {
     const onDown = () => setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -29,9 +45,17 @@ function WorkspaceSwitcher({ filter, onFilterChange, views, t }) {
   return (
     <div className="bb-switcher">
       <button
+        ref={buttonRef}
         type="button"
         className="bb-switcher-btn"
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+            requestAnimationFrame(() => menuRef.current?.querySelector("button")?.focus());
+          }
+        }}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -43,7 +67,19 @@ function WorkspaceSwitcher({ filter, onFilterChange, views, t }) {
         <span className="bb-switcher-caret" aria-hidden>▾</span>
       </button>
       {open && (
-        <div className="bb-switcher-menu" role="menu" onMouseDown={(e) => e.stopPropagation()}>
+        <div
+          ref={menuRef}
+          className="bb-switcher-menu"
+          role="menu"
+          onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            const items = [...menuRef.current.querySelectorAll("button")];
+            const index = items.indexOf(document.activeElement);
+            if (e.key === "Escape") { e.preventDefault(); setOpen(false); buttonRef.current?.focus(); }
+            if (e.key === "ArrowDown") { e.preventDefault(); items[(index + 1) % items.length]?.focus(); }
+            if (e.key === "ArrowUp") { e.preventDefault(); items[(index - 1 + items.length) % items.length]?.focus(); }
+          }}
+        >
           <button
             type="button"
             role="menuitem"
@@ -72,7 +108,7 @@ function WorkspaceSwitcher({ filter, onFilterChange, views, t }) {
 }
 
 /** Left-edge drag handle: pointer capture, clamps via the store action. */
-function DrawerHandle({ width, onResize }) {
+function DrawerHandle({ width, onResize, label }) {
   const [dragging, setDragging] = useState(false);
   const base = useRef(0);
   const startX = useRef(0);
@@ -87,18 +123,32 @@ function DrawerHandle({ width, onResize }) {
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
     onResize(Math.min(Math.max(base.current + (startX.current - e.clientX), DRAWER_MIN), DRAWER_MAX));
   };
-  const onPointerUp = (e) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    e.currentTarget.releasePointerCapture(e.pointerId);
+  const finishPointer = (e) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     setDragging(false);
   };
   return (
     <div
       className="bb-drawer-handle"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuemin={DRAWER_MIN}
+      aria-valuemax={DRAWER_MAX}
+      aria-valuenow={width}
+      tabIndex={0}
       data-dragging={dragging || undefined}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft") { e.preventDefault(); onResize(width + 20); }
+        if (e.key === "ArrowRight") { e.preventDefault(); onResize(width - 20); }
+        if (e.key === "Home") { e.preventDefault(); onResize(DRAWER_MIN); }
+        if (e.key === "End") { e.preventDefault(); onResize(DRAWER_MAX); }
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
+      onPointerUp={finishPointer}
+      onPointerCancel={finishPointer}
+      onLostPointerCapture={() => setDragging(false)}
     />
   );
 }
@@ -106,10 +156,8 @@ function DrawerHandle({ width, onResize }) {
 export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, renderSlot, t, cycleTheme, injectBuildTag, openSession }) {
   const panels = useStore((s) => s);
   const current = useSessions((s) => s.current);
-  const currentBlank = useSessions((s) => {
-    const c = s.current;
-    return c !== undefined ? s.byId[c]?.blank !== false : false;
-  });
+  const drawerRef = useRef(null);
+  const drawerTabStops = useRef(new Map());
   // Children are real sessions with parentId. Keep the parent as the tab root
   // while a child is active, so selecting a subagent never loses the tab strip.
   const conversationTabs = useSessions((s) => {
@@ -133,22 +181,73 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
   });
 
   // Narrow viewport: the nav shrinks to the stock 56px rail (collapsed mode).
-  const [narrow, setNarrow] = useState(() => window.innerWidth < 1100);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   useEffect(() => {
-    const onResize = () => setNarrow(window.innerWidth < 1100);
+    const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+  const narrow = viewportWidth < 1100;
   const navCollapsed = panels.sidebar === 0;
   const navW = narrow ? 56 : navCollapsed ? 0 : panels.sidebar || NAV_DEFAULT;
   const wsList = useWorkspaces((s) => s);
   const views = useMemo(() => workspaceViewsOf(wsList), [wsList]);
   const drawerOpen = current !== undefined && panels.drawerOpen;
-  const drawerW = panels.drawerWidth || 640;
-  const detailsW = panels.details > 0 ? panels.details : 0;
-  // The drawer keeps its width while closed (slides off-screen via CSS),
-  // so the conversation stays mounted and streaming.
-  const drawerContentW = current !== undefined ? drawerW + detailsW : 0;
+  const storedDrawerW = panels.drawerWidth || 640;
+  const detailsOverlay = viewportWidth < 700 && panels.details > 0;
+  const detailsW = panels.details > 0
+    ? detailsOverlay ? viewportWidth : Math.min(panels.details, Math.floor(viewportWidth * 0.45))
+    : 0;
+  // Include details in the viewport budget. On phones details overlays the
+  // still-mounted conversation instead of compressing it to an unusable strip.
+  const desiredDrawerW = storedDrawerW + (detailsOverlay ? 0 : detailsW);
+  const drawerContentW = current !== undefined ? Math.min(desiredDrawerW, viewportWidth) : 0;
+
+  // Keep the streaming conversation mounted while closed, but remove every
+  // descendant from sequential focus order. Native inert handles navigation;
+  // explicit tabIndex suppression also covers deterministic audits and older
+  // assistive technology. Original attributes are restored on reopen.
+  useEffect(() => {
+    const root = drawerRef.current;
+    if (root === null) return;
+    const selector = "a[href], button, input, select, textarea, [tabindex]";
+    const restore = () => {
+      for (const [element, tabIndex] of drawerTabStops.current) {
+        if (tabIndex === null) element.removeAttribute("tabindex");
+        else element.setAttribute("tabindex", tabIndex);
+      }
+      drawerTabStops.current.clear();
+    };
+    if (drawerOpen) {
+      restore();
+      return;
+    }
+    const suppress = (scope) => {
+      const elements = [scope, ...scope.querySelectorAll?.(selector) ?? []];
+      for (const element of elements) {
+        if (!(element instanceof Element) || !element.matches(selector)) continue;
+        if (!drawerTabStops.current.has(element)) drawerTabStops.current.set(element, element.getAttribute("tabindex"));
+        if (element.getAttribute("tabindex") !== "-1") element.setAttribute("tabindex", "-1");
+      }
+    };
+    suppress(root);
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes") suppress(record.target);
+        for (const node of record.addedNodes) if (node instanceof Element) suppress(node);
+      }
+    });
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["tabindex"] });
+    return () => observer.disconnect();
+  }, [drawerOpen, current]);
+
+  useEffect(() => () => {
+    for (const [element, tabIndex] of drawerTabStops.current) {
+      if (tabIndex === null) element.removeAttribute("tabindex");
+      else element.setAttribute("tabindex", tabIndex);
+    }
+    drawerTabStops.current.clear();
+  }, []);
 
   // Drawer stays collapsed on load; a session change after mount opens it
   // (board card clicks open explicitly via their inject face).
@@ -180,6 +279,24 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
         : t("theme.system");
 
   const buildTag = injectBuildTag ?? "dev";
+  const closeDrawer = () => {
+    actions.setDrawerOpen(false);
+    requestAnimationFrame(() => {
+      const currentCard = current === undefined ? null : document.querySelector('[data-session="' + CSS.escape(current) + '"]');
+      (currentCard ?? document.querySelector(".bb-search"))?.focus?.({ preventScroll: true });
+    });
+  };
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape" || document.querySelector(".bb-palette-backdrop, .bb-menu") !== null) return;
+      event.preventDefault();
+      closeDrawer();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen, current, actions]);
 
   return (
     <div className="bb-frame" data-drawer-open={drawerOpen || undefined}>
@@ -226,22 +343,39 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
         </main>
 
         {/* floating drawer (overlay, drag-resizable) */}
-        <aside className="bb-drawer" style={{ width: drawerContentW }}>
+        <aside
+          ref={drawerRef}
+          className="bb-drawer"
+          role="dialog"
+          aria-modal="false"
+          aria-label={t("drawer.panel")}
+          aria-hidden={!drawerOpen}
+          inert={drawerOpen ? undefined : ""}
+          style={{ width: drawerContentW }}
+        >
           {drawerContentW > 0 && (
-            <DrawerHandle width={drawerW} onResize={(px) => actions.setDrawerWidth(px)} />
+            <DrawerHandle width={panels.drawerWidth || 640} label={t("drawer.resize")} onResize={(px) => actions.setDrawerWidth(px)} />
           )}
           <div className="bb-drawer-inner">
-            <div className="bb-drawer-tabs">
+            <div className="bb-drawer-tabs" role="tablist" aria-label={t("drawer.tabs")} onKeyDown={handleTabListKeyDown}>
               <button
                 type="button"
+                role="tab"
                 className={"bb-drawer-tab" + (drawerTab === "chat" ? " is-active" : "")}
+                aria-selected={drawerTab === "chat"}
+                aria-controls="bb-drawer-chat"
+                tabIndex={drawerTab === "chat" ? 0 : -1}
                 onClick={() => actions.setDrawerTab("chat")}
               >
                 {t("drawer.chat")}
               </button>
               <button
                 type="button"
+                role="tab"
                 className={"bb-drawer-tab" + (drawerTab === "activity" ? " is-active" : "")}
+                aria-selected={drawerTab === "activity"}
+                aria-controls="bb-drawer-activity"
+                tabIndex={drawerTab === "activity" ? 0 : -1}
                 onClick={() => actions.setDrawerTab("activity")}
               >
                 {t("drawer.activity")}
@@ -252,17 +386,18 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
                 className="bb-drawer-close"
                 title={t("drawer.close")}
                 aria-label={t("drawer.close")}
-                onClick={() => actions.setDrawerOpen(false)}
+                onClick={closeDrawer}
               >
                 ✕
               </button>
             </div>
             {conversationTabs.rootId !== undefined && conversationTabs.entries.length > 0 && (
-              <div className="bb-conversation-tabs" role="tablist" aria-label={t("drawer.conversationTabs")}>
+              <div className="bb-conversation-tabs" role="tablist" aria-label={t("drawer.conversationTabs")} onKeyDown={handleTabListKeyDown}>
                 <button
                   type="button"
                   role="tab"
                   aria-selected={current === conversationTabs.rootId}
+                  tabIndex={current === conversationTabs.rootId ? 0 : -1}
                   className={"bb-conversation-tab" + (current === conversationTabs.rootId ? " is-active" : "")}
                   onClick={() => { actions.setDrawerTab("chat"); openSession?.(conversationTabs.rootId); }}
                 >
@@ -275,6 +410,7 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
                     type="button"
                     role="tab"
                     aria-selected={current === entry.id}
+                    tabIndex={current === entry.id ? 0 : -1}
                     className={"bb-conversation-tab" + (current === entry.id ? " is-active" : "")}
                     title={entry.label}
                     onClick={() => { actions.setDrawerTab("chat"); openSession?.(entry.id); }}
@@ -286,14 +422,22 @@ export function BoardFrame({ useStore, useSessions, useWorkspaces, actions, rend
                 ))}
               </div>
             )}
-            <div className="bb-drawer-pane" data-hidden={drawerTab !== "chat" || undefined}>
+            <div id="bb-drawer-chat" role="tabpanel" className="bb-drawer-pane" data-hidden={drawerTab !== "chat" || undefined}>
               {renderSlot("conversation", {})}
             </div>
-            <div className="bb-drawer-pane" data-hidden={drawerTab !== "activity" || undefined}>
+            <div id="bb-drawer-activity" role="tabpanel" className="bb-drawer-pane" data-hidden={drawerTab !== "activity" || undefined}>
               {renderSlot("activity", {})}
             </div>
           </div>
-          <aside className="bb-details" style={{ width: detailsW }}>
+          <aside
+            className="bb-details"
+            aria-label={t("drawer.details")}
+            aria-hidden={detailsW === 0}
+            inert={detailsW === 0 ? "" : undefined}
+            data-hidden={detailsW === 0 || undefined}
+            data-overlay={detailsOverlay || undefined}
+            style={{ width: detailsW }}
+          >
             {renderSlot("details", {})}
           </aside>
         </aside>

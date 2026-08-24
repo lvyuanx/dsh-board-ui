@@ -1,5 +1,5 @@
 // Smoke test: load the built bundle the way the web shell does and assert
-// the full take-over contract: root registration (priority -1, five child
+// the full take-over contract: root registration (priority -1, six child
 // slots), layout service, locale dict, theme presenter, CSS injection,
 // board + palette registrations.
 import { readFileSync } from "node:fs";
@@ -48,6 +48,27 @@ const opened = [];
 const setThemeCalls = [];
 const themeListeners = [];
 let rootInject;
+let boardInject;
+let promptResult = { ok: true, value: { accepted: true } };
+const boardState = { planningIds: [], pausedIds: [], reviewPendingIds: [], acceptedIds: [], acceptedAtById: {}, mainErrors: {} };
+const boardActions = {
+  markPlanning: (id) => { if (!boardState.planningIds.includes(id)) boardState.planningIds.push(id); },
+  unmarkPlanning: (id) => { boardState.planningIds = boardState.planningIds.filter((x) => x !== id); },
+  markPaused: (id) => { if (!boardState.pausedIds.includes(id)) boardState.pausedIds.push(id); },
+  unmarkPaused: (id) => { boardState.pausedIds = boardState.pausedIds.filter((x) => x !== id); },
+  clearReviewDecision: (id) => {
+    boardState.reviewPendingIds = boardState.reviewPendingIds.filter((x) => x !== id);
+    boardState.acceptedIds = boardState.acceptedIds.filter((x) => x !== id);
+    delete boardState.acceptedAtById[id];
+  },
+  acceptReview: () => {}, markReviewPending: () => {}, setMainError: () => {}, clearMainError: () => {}
+};
+const fakeSessionFace = {
+  prompt: async () => promptResult,
+  cancel: async () => ({ ok: true, value: { accepted: true } }),
+  rename: async (title) => ({ ok: true, value: { title, seq: 1 } }),
+  conversation: { snapshot: () => undefined }
+};
 const ctx = {
   effect: (fn) => { fn(); return () => {}; },
   locale: { register: (ns, dicts) => localeRegs.push([ns, Object.keys(dicts)]) },
@@ -65,15 +86,27 @@ const ctx = {
         hasComponent: typeof comp === "function"
       });
       if (opts.name === "root" && opts.inject) {
-        const stubActions = { syncTheme: () => {}, toggleSidebar: () => {}, openDetails: () => {}, closeDetails: () => {} };
+        const stubActions = {
+          syncTheme: () => {}, toggleSidebar: () => {}, openDetails: () => {}, closeDetails: () => {},
+          setDrawerOpen: () => {}, setDrawerTab: () => {}, setDrawerWidth: () => {}, setWorkspaceFilter: () => {}
+        };
         rootInject = opts.inject(stubActions);
       }
+      if (opts.name === "board" && opts.inject) boardInject = opts.inject(boardActions);
       return () => {};
     }
   },
   reflect: { provide: (name, svc) => { provided[name] = svc; return () => {}; } },
-  sessions: { open: (id) => opened.push(id), list: { subscribe: () => () => {}, getSnapshot: () => ({ current: undefined }) } },
-  workspaces: {}
+  sessions: {
+    open: (id) => opened.push(id),
+    binding: () => ({ session: fakeSessionFace }),
+    fork: async () => "forked",
+    list: { subscribe: () => () => {}, getSnapshot: () => ({ current: undefined, byId: {}, ids: [] }) }
+  },
+  workspaces: {
+    list: { getSnapshot: () => ({ items: [{ workspaceId: "ws1", title: "A", sessionIds: [] }], recentWorkspaceId: "ws1", archivedSessionIds: [] }) },
+    archiveSession: async () => {}, insertSessionBefore: async () => {}
+  }
 };
 exports_.apply(ctx);
 
@@ -116,8 +149,40 @@ rootInject.cycleTheme();
 if (setThemeCalls.length !== 1 || setThemeCalls[0] !== "light")
   throw new Error("cycleTheme did not call setTheme(light): " + JSON.stringify(setThemeCalls));
 
-// --- pure column logic: five lifecycle columns, agent counts aggregated ---
-// 待执行 (plans only) / 进行中 / 需要处理 / 验收中 / 已完成; pendingInteraction
+// --- action transactions: local state commits only after Host acceptance ---
+if (!boardInject) throw new Error("board inject face missing");
+boardInject.openSession("tx", false);
+if (!opened.includes("tx")) throw new Error("board openSession must not require a store snapshot method");
+promptResult = { ok: false, error: { code: "rejected", message: "no" } };
+boardState.planningIds = ["tx"];
+let rejected = false;
+try { await boardInject.executePlan("tx"); } catch { rejected = true; }
+if (!rejected || !boardState.planningIds.includes("tx")) throw new Error("failed executePlan must preserve planning state");
+promptResult = { ok: true, value: { accepted: true } };
+await boardInject.executePlan("tx");
+if (boardState.planningIds.includes("tx")) throw new Error("accepted executePlan must clear planning state");
+
+boardState.pausedIds = ["tx"];
+promptResult = { ok: false, error: { code: "rejected", message: "no" } };
+try { await boardInject.resumeSession("tx"); } catch {}
+if (!boardState.pausedIds.includes("tx")) throw new Error("failed resume must preserve paused state");
+promptResult = { ok: true, value: { accepted: true } };
+await boardInject.resumeSession("tx");
+if (boardState.pausedIds.includes("tx")) throw new Error("accepted resume must clear paused state");
+
+boardState.reviewPendingIds = ["tx"];
+boardState.acceptedIds = ["tx"];
+boardState.acceptedAtById.tx = 1;
+promptResult = { ok: false, error: { code: "rejected", message: "no" } };
+try { await boardInject.reRunSession("tx"); } catch {}
+if (!boardState.acceptedIds.includes("tx") || boardState.acceptedAtById.tx !== 1) throw new Error("failed re-run must preserve review decision");
+promptResult = { ok: true, value: { accepted: true } };
+await boardInject.reRunSession("tx");
+if (boardState.acceptedIds.includes("tx") || boardState.reviewPendingIds.includes("tx") || boardState.acceptedAtById.tx !== undefined)
+  throw new Error("accepted re-run must clear review decision");
+
+// --- pure column logic: six lifecycle columns, agent counts aggregated ---
+// 待执行 (plans only) / 进行中 / 需要处理 / 验收中 / 失败 / 已完成; pendingInteraction
 // outranks running; finished-unreviewed agent tasks land in 验收中; paused
 // cards stay in the running column with the ⏸ badge.
 const fake = {
@@ -142,7 +207,7 @@ const fake2 = {
   jobsBySession: {}
 };
 const cols = exports_.buildColumns(fake2.ids, fake2.byId, fake2.jobsBySession, ["plan1"]);
-const allCards = [...cols.pending, ...cols.running, ...cols.action_required, ...cols.reviewing, ...cols.completed];
+const allCards = [...cols.pending, ...cols.running, ...cols.action_required, ...cols.reviewing, ...cols.failed, ...cols.completed];
 if (allCards.length !== 5) throw new Error("expected 5 main-task cards, got " + allCards.length);
 if (allCards.some((c) => c.id === "plan1")) throw new Error("planning session leaked into a status column");
 if (cols.pending.length !== 0) throw new Error("no session may derive into the pending column (plans only)");
@@ -236,6 +301,34 @@ const planningOnlyNodes = [
 ];
 if (exports_.planStartedInConversation(planningOnlyNodes)) throw new Error("read-only planning tools must NOT count as started");
 if (exports_.planStartedInConversation([])) throw new Error("empty conversation must not count as started");
+const wrappedRead = {
+  kind: "tool-call", name: "run_code",
+  argsRaw: JSON.stringify({ code: 'const r = await tools.read({file_path:"x"});' })
+};
+if (exports_.toolCallStartsExecution(wrappedRead)) throw new Error("read-only run_code wrapper must stay planning");
+const wrappedReadWithExamples = {
+  kind: "tool-call", name: "run_code",
+  argsRaw: JSON.stringify({ code: 'const example = "tools.write({})"; // tools.edit({})\nawait tools.read({file_path:"x"});' })
+};
+if (exports_.toolCallStartsExecution(wrappedReadWithExamples)) throw new Error("tool text in strings/comments must be ignored");
+const wrappedWrite = {
+  kind: "tool-call", name: "run_code",
+  argsRaw: JSON.stringify({ code: 'await tools["write"]({file_path:"x",content:"y"});' })
+};
+if (!exports_.toolCallStartsExecution(wrappedWrite)) throw new Error("mutating run_code wrapper must start execution");
+if (!exports_.toolCallStartsExecution({ kind: "tool-call", name: "run_code", argsRaw: "{" }))
+  throw new Error("opaque run_code wrapper must be conservative");
+
+// --- terminal reasons: only completed is a clean outcome ---
+const turnWith = (reason) => [{ turn: 1, end: { data: { reason } } }];
+if (exports_.mainIssueOfTurns(turnWith({ kind: "completed" })) !== null) throw new Error("completed turn must be clean");
+for (const kind of ["max-tokens", "interrupted", "blocked"]) {
+  if (exports_.mainIssueOfTurns(turnWith({ kind }))?.kind !== kind) throw new Error(kind + " turn must remain actionable");
+}
+if (exports_.mainIssueOfTurns(turnWith({ kind: "aborted", reason: { kind: "user" } }))?.kind !== "aborted")
+  throw new Error("aborted turn must not look completed");
+const issue = exports_.mainIssueOfTurns(turnWith({ kind: "error", error: { message: "overloaded", code: "busy" } }));
+if (issue?.message !== "overloaded" || issue?.code !== "busy") throw new Error("error outcome details lost");
 
 // --- workspace mapping: list items are RAW host views ---
 const rawViews = exports_.workspaceViewsOf({
@@ -246,7 +339,12 @@ const rawViews = exports_.workspaceViewsOf({
 });
 if (rawViews.length !== 2) throw new Error("workspaceViewsOf should return raw views, got " + rawViews.length);
 if (exports_.workspaceIdOfSession(rawViews, "s3") !== "ws2") throw new Error("workspaceIdOfSession wrong");
-if (exports_.workspaceColorOf(rawViews, "ws2") !== exports_.workspaceColorOf(rawViews, "ws2")) throw new Error("color stability");
+if (exports_.workspaceColorOf(rawViews, "ws2") !== exports_.workspaceColorOf([...rawViews].reverse(), "ws2"))
+  throw new Error("workspace color must survive reordering");
+const visible = exports_.filterSessionsByWorkspace(["s1", "s2", "s3"], {}, rawViews, null, ["s2"]);
+if (JSON.stringify(visible) !== JSON.stringify(["s1", "s3"])) throw new Error("archived sessions leaked into all-workspace board");
+const scopedVisible = exports_.filterSessionsByWorkspace(["s1", "s2", "s3"], {}, rawViews, "ws1", ["s2"]);
+if (JSON.stringify(scopedVisible) !== JSON.stringify(["s1"])) throw new Error("archive + workspace filtering wrong");
 
 console.log("root children:", JSON.stringify(rootReg.children));
 console.log("layout service:", Object.keys(provided));

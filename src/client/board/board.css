@@ -13,6 +13,21 @@
 }
 .bb-board-title { font-size: 16px; font-weight: 650; letter-spacing: 0.2px; }
 .bb-board-sub { font-size: 12.5px; color: var(--bb-text-3); }
+.bb-operation-error {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 4px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--bb-col-failed);
+  border-radius: var(--bb-radius);
+  background: var(--bb-col-failed-soft);
+  color: var(--bb-col-failed);
+  font-size: 12px;
+}
+.bb-operation-error span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bb-operation-error button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 16px; }
 
 .bb-cols {
   flex: 1;
@@ -304,6 +319,7 @@
   transition: background 0.12s var(--bb-ease);
 }
 .bb-card-primary:hover { background: var(--bb-brand-strong); }
+.bb-card-primary:disabled, .bb-card-more:disabled, .bb-pool-add:disabled { opacity: 0.55; cursor: wait; }
 .bb-card-more {
   margin-left: auto;
   width: 24px;
@@ -384,4 +400,12 @@
 .bb-col-cards::-webkit-scrollbar-thumb, .bb-cols::-webkit-scrollbar-thumb {
   background: var(--bb-border-strong);
   border-radius: 3px;
+}
+
+@media (max-width: 700px) {
+  .bb-board-root { padding: 10px; }
+  .bb-board-head { align-items: center; gap: 8px; padding-bottom: 10px; }
+  .bb-board-sub { display: none; }
+  .bb-filter { max-width: 132px; }
+  .bb-cols { gap: 10px; }
 }
