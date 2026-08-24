@@ -16,6 +16,9 @@ export const zh = {
   "col.failed.sub": "任务执行失败，请重试",
   "col.completed": "已完成",
   "col.completed.sub": "任务已完成",
+  "col.archived": "已归档",
+  "col.archived.sub": "保留记录，可随时打开查看",
+  "col.archived.empty": "暂无已归档任务",
   // card status badges
   "card.statusPending": "待执行",
   "card.statusRunning": "进行中",
@@ -137,6 +140,9 @@ export const en = {
   "col.failed.sub": "Execution failed, retry needed",
   "col.completed": "Done",
   "col.completed.sub": "Tasks completed",
+  "col.archived": "Archived",
+  "col.archived.sub": "Records are retained and can be opened anytime",
+  "col.archived.empty": "No archived tasks",
   // card status badges
   "card.statusPending": "Pending",
   "card.statusRunning": "Running",

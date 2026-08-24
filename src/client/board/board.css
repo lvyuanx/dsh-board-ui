@@ -99,6 +99,16 @@
   font-size: 12px;
   color: var(--bb-text-3);
 }
+/* Archived is intentionally subdued: it preserves history without competing
+   with the live work lanes. */
+.bb-col-archived {
+  background: color-mix(in srgb, var(--bb-panel) 88%, var(--bb-text-3));
+  border-style: dashed;
+}
+.bb-col-archived .bb-col-head { background: color-mix(in srgb, var(--bb-panel-2) 72%, transparent); }
+.bb-col-archived .bb-col-dot { background: var(--bb-text-3); }
+.bb-col-archived .bb-card { opacity: 0.82; }
+.bb-col-archived .bb-card:hover, .bb-col-archived .bb-card:focus-within { opacity: 1; }
 
 /* ── session card ────────────────────────────────────── */
 .bb-card {

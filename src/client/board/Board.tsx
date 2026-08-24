@@ -12,7 +12,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   COLUMNS, buildColumns, agentStatsOf, childrenMapOf, relativeTime,
-  workspaceViewsOf, workspaceIdOfSession, workspaceColorOf, filterSessionsByWorkspace
+  workspaceViewsOf, workspaceIdOfSession, workspaceColorOf, filterSessionsByWorkspace, isAutoArchivable
 } from "./columns";
 
 const MENU_NONE = { kind: null, id: null, x: 0, y: 0, trigger: null };
@@ -103,7 +103,7 @@ function AgentStatsRow({ running, done, waiting, failed, total, showBar, t }) {
 /** Status hint line: why the card sits where it sits — the concrete pending
  * reason (需要处理), the acceptance note (验收中), the failure alert with
  * 重试/查看错误 (any status), or the acceptance meta (已完成). */
-function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, onViewError }) {
+function HintLine({ status, session, acceptedAt, failed, mainError, readOnly, t, onRetry, onViewError }) {
   const lines = [];
   const mainIssueText = mainError === null ? ""
     : mainError.kind === "max-tokens" ? t("card.maxTokensHint")
@@ -130,7 +130,7 @@ function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, 
       <div key="failed" className="bb-card-hint" data-kind="failed">
         <span aria-hidden>⚠</span>
         <span className="bb-card-hint-msg">{failed > 0 ? t("card.failedHint", { n: failed }) : mainIssueText}</span>
-        <span className="bb-card-hint-actions">
+        {!readOnly && <span className="bb-card-hint-actions">
           <button
             type="button"
             className="bb-card-hint-btn"
@@ -145,7 +145,7 @@ function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, 
           >
             {t("task.viewError")}
           </button>
-        </span>
+        </span>}
       </div>
     );
   }
@@ -161,7 +161,7 @@ function HintLine({ status, session, acceptedAt, failed, mainError, t, onRetry, 
 
 /** Task card (plans + sessions share one anatomy): head → title → status
  * badge → hint → agent stats → progress → one primary action + ⋯ menu. */
-function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing, draft, primaryLabel, busy, t, onOpen, onPrimary, onMenu, onStartRename, onDraft, onCommitRename, onDragStart, onRetry, onViewError }) {
+function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing, draft, primaryLabel, busy, readOnly = false, t, onOpen, onPrimary, onMenu, onStartRename, onDraft, onCommitRename, onDragStart, onRetry, onViewError }) {
   const { session, status, acceptedAt, agentRunning, agentDone, agentWaiting, agentFailed, agentTotal, mainError } = item;
   if (editing) {
     return (
@@ -189,7 +189,7 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
       tabIndex={0}
       role="group"
       aria-label={t("card.projectTask", { project: wsTitle, title: session.displayTitle })}
-      draggable={!busy}
+      draggable={!busy && !readOnly}
       aria-busy={busy || undefined}
       onDragStart={(e) => { onDragStart(e, session.id); }}
       onClick={onOpen}
@@ -217,6 +217,7 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
         acceptedAt={acceptedAt}
         failed={agentFailed}
         mainError={mainError ?? null}
+        readOnly={readOnly}
         t={t}
         onRetry={onRetry}
         onViewError={onViewError}
@@ -287,6 +288,30 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     if (filter === null) return plans;
     return plans.filter((s) => workspaceIdOfSession(views, s.id) === filter);
   }, [plans, views, filter]);
+
+  // Archived sessions remain in the runtime list; surface them in their own
+  // read-only lane instead of letting the archive set make them unreachable.
+  const archivedItems = useMemo(() => {
+    const archived = new Set(archivedSessionIds);
+    const allItems = Object.values(buildColumns(
+      snap.ids, snap.byId, snap.jobsBySession, planningIds, snap.subagentsByParent,
+      pausedIds, mainErrors, reviewPendingIds, acceptedIds, acceptedAtById
+    )).flat().filter((item) => archived.has(item.id));
+    const childrenOf = childrenMapOf(snap.ids, snap.byId);
+    const planning = new Set(planningIds);
+    for (const id of archivedSessionIds) {
+      if (!planning.has(id)) continue;
+      const session = snap.byId[id];
+      if (session === undefined || session.blank || session.parentId !== undefined) continue;
+      allItems.push({
+        id, session, status: "pending", mainError: null, acceptedAt: acceptedAtById[id],
+        ...agentStatsOf(id, snap.byId, childrenOf, snap.subagentsByParent)
+      });
+    }
+    return allItems
+      .filter((item) => filter === null || workspaceIdOfSession(views, item.id) === filter)
+      .sort((a, b) => (b.session.updatedAt ?? 0) - (a.session.updatedAt ?? 0));
+  }, [archivedSessionIds, snap, planningIds, pausedIds, mainErrors, reviewPendingIds, acceptedIds, acceptedAtById, views, filter]);
   const wsTitleOf = (wsId) => {
     if (wsId === "") return t("pool.ungrouped");
     return views.find((v) => v.workspaceId === wsId)?.title ?? t("pool.ungrouped");
@@ -470,6 +495,23 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     }
   };
 
+  // Evaluate immediately and then hourly while the board stays open. The host
+  // owns the durable archive set; this only requests the normal archive RPC.
+  useEffect(() => {
+    const archiveInactive = () => {
+      const archived = new Set(archivedSessionIds);
+      for (const id of snap.ids) {
+        const session = snap.byId[id];
+        if (isAutoArchivable(session, archived, snap.current)) {
+          void runAction(id, "auto-archive", () => archiveSession(id));
+        }
+      }
+    };
+    archiveInactive();
+    const timer = window.setInterval(archiveInactive, 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [snap.ids, snap.byId, snap.current, archivedSessionIds, archiveSession]);
+
   const openMenu = (kind, id, event) => {
     setMenu({ kind, id, x: event.clientX, y: event.clientY, trigger: event.currentTarget });
   };
@@ -532,7 +574,7 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
   };
 
   const flat = STATUS_COLUMNS.flatMap((c) => buckets[c.key]);
-  const navList = [...shownPlans.map((s) => ({ id: s.id, kind: "plan" })), ...flat.map((it) => ({ id: it.id, kind: "session" }))];
+  const navList = [...shownPlans.map((s) => ({ id: s.id, kind: "plan" })), ...flat.map((it) => ({ id: it.id, kind: "session" })), ...archivedItems.map((it) => ({ id: it.id, kind: "archived" }))];
   const onKeyDown = (e) => {
     if (e.target instanceof Element && e.target.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
     if (e.key !== "j" && e.key !== "k" && e.key !== "Enter") return;
@@ -588,6 +630,10 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     if (item.status === "failed") return { label: t("task.restart"), run: () => void runAction(id, "retry", () => retrySession(id)) };
     return { label: t("task.viewResult"), run: () => openFrom(id) };
   };
+
+  const archivedMenu = (item) => [
+    { label: t("menu.open"), run: () => { closeMenu(false); openFrom(item.id); } }
+  ];
 
   const sessionMenu = (item) => {
     const id = item.id;
@@ -748,6 +794,47 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
             </section>
           );
         })}
+        <section className="bb-col bb-col-archived" data-col="archived">
+          <div className="bb-col-head">
+            <span className="bb-col-dot" />
+            <div className="bb-col-main">
+              <div className="bb-col-title-row">
+                <span className="bb-col-title">{t("col.archived")}</span>
+                <span className="bb-col-count">{archivedItems.length}</span>
+              </div>
+              <span className="bb-col-sub">{t("col.archived.sub")}</span>
+            </div>
+          </div>
+          <div className="bb-col-cards">
+            {archivedItems.length === 0 && <div className="bb-col-empty">{t("col.archived.empty")}</div>}
+            {archivedItems.map((item, i) => (
+              <TaskCard
+                key={item.id}
+                item={item}
+                animIndex={Math.min(i, 12)}
+                current={item.id === snap.current}
+                focused={item.id === focus}
+                editing={false}
+                draft=""
+                primaryLabel={t("menu.open")}
+                busy={busyIds.has(item.id)}
+                readOnly
+                t={t}
+                wsColor={workspaceColorOf(views, workspaceIdOfSession(views, item.id))}
+                wsTitle={wsTitleOf(workspaceIdOfSession(views, item.id))}
+                onOpen={() => openFrom(item.id)}
+                onPrimary={() => openFrom(item.id)}
+                onMenu={(e) => openMenu("archived", item.id, e)}
+                onStartRename={() => {}}
+                onDraft={() => {}}
+                onCommitRename={() => {}}
+                onDragStart={() => {}}
+                onRetry={() => openActivity(item.id)}
+                onViewError={() => openActivity(item.id)}
+              />
+            ))}
+          </div>
+        </section>
       </div>
 
       {menu.kind !== null && (
@@ -757,6 +844,8 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
               {menuItem(t("pool.open"), () => { closeMenu(false); openSession(menu.id, true); })}
               {menuItem(t("pool.unplan"), () => { closeMenu(false); actions.unmarkPlanning(menu.id); }, true)}
             </div>
+          ) : menu.kind === "archived" ? (
+            <div>{archivedMenu(archivedItems.find((it) => it.id === menu.id) ?? { id: menu.id }).map((m) => menuItem(m.label, m.run, m.danger))}</div>
           ) : (
             <div>
               {sessionMenu(flat.find((it) => it.id === menu.id) ?? { id: menu.id, status: "completed" }).map((m) => menuItem(m.label, m.run, m.danger))}

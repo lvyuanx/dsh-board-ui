@@ -38,6 +38,22 @@ export type TaskStatus =
 /** Column keys — every status except the card-level "paused" pseudo-state. */
 export type ColumnKey = Exclude<TaskStatus, "paused">;
 
+/** Sessions inactive for this long are automatically moved to the archive. */
+export const AUTO_ARCHIVE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** A conservative auto-archive gate: never move blank drafts, live work, or
+ * the conversation the user currently has open. */
+export function isAutoArchivable(session, archived, currentId, now = Date.now()) {
+  return session !== undefined
+    && !archived.has(session.id)
+    && !session.blank
+    && session.parentId === undefined
+    && !session.running
+    && session.id !== currentId
+    && typeof session.updatedAt === "number"
+    && now - session.updatedAt >= AUTO_ARCHIVE_AFTER_MS;
+}
+
 export const COLUMNS: { key: ColumnKey; dot: string }[] = [
   { key: "pending", dot: "var(--bb-brand)" },
   { key: "running", dot: "var(--bb-col-running)" },
