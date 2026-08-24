@@ -39,7 +39,7 @@ export type TaskStatus =
 export type ColumnKey = Exclude<TaskStatus, "paused">;
 
 /** Sessions inactive for this long are automatically moved to the archive. */
-export const AUTO_ARCHIVE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+export const AUTO_ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** A conservative auto-archive gate: never move blank drafts, live work, or
  * the conversation the user currently has open. */
