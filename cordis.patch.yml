@@ -1,0 +1,7 @@
+# Replace the stock Web frame with the board UI client plugin.
+- id: ui-layout
+  disabled: true
+
+- insert:
+    - id: board-ui
+      name: '@deepseek-ai/dsh-board-ui'

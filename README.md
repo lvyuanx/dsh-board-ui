@@ -21,20 +21,29 @@ node scripts/verify.mjs # 冒烟测试（root 注册/槽位声明/layout 服务/
 
 ### 安装为 dsh web 客户端插件
 
-```bash
-# 1) 将本目录 link 进 dsh web profile（示例路径，按实际环境调整）
-ln -s "$PWD" ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-board-ui
+市场/普通安装直接让 dsh 通过 GitHub 安装：
 
-# 2) 在 ~/.dsh/profiles/web/cordis.patch.yml 中写入插件行
-#    - 禁用官方 ui-layout（避免槽位冲突）
-#    - insert 启用本插件的 @deepseek-ai/dsh-board-ui
+```bash
+dsh plugin --profile web add https://github.com/lvyuanx/dsh-board-ui.git
 ```
 
-**首次安装需要重启 dsh web**（新的插件行进入 roster）；之后每次 rebuild + 浏览器
-刷新即可看到新 bundle（bundle 按请求重新读取）。
+仓库中的 `dsh.bundle` 会自动加载 `cordis.patch.yml`：禁用官方 `ui-layout` 并插入本插件。
+首次安装需要重启 `dsh web`；之后每次 rebuild 后刷新浏览器即可看到新 bundle。
 
-**回退**：删除 `cordis.patch.yml` 中两处 board-ui 行（禁用 ui-layout + insert）即
-恢复官方 UI。
+本地开发可以把当前 checkout 接入 profile：
+
+```bash
+dsh plugin --profile web add "$PWD"
+pnpm watch
+```
+
+**回退**：
+
+```bash
+dsh plugin --profile web remove @deepseek-ai/dsh-board-ui
+```
+
+删除后重启 `dsh web` 即恢复官方 UI。
 
 ## 看板：六状态生命周期
 
