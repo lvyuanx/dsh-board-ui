@@ -24,7 +24,9 @@ export const zh = {
   "card.statusReviewing": "验收中",
   "card.statusFailed": "失败",
   "card.statusDone": "已完成",
-  // card hint lines
+  // card identity and hint lines
+  "card.project": "项目",
+  "card.projectTask": "项目 {project}：{title}",
   "card.reasonApproval": "等待审批",
   "card.reasonPlanReview": "计划待审",
   "card.reasonQuestion": "等待你的回答",
@@ -143,7 +145,9 @@ export const en = {
   "card.statusReviewing": "In Review",
   "card.statusFailed": "Failed",
   "card.statusDone": "Done",
-  // card hint lines
+  // card identity and hint lines
+  "card.project": "Project",
+  "card.projectTask": "Project {project}: {title}",
   "card.reasonApproval": "Awaiting approval",
   "card.reasonPlanReview": "Plan awaiting review",
   "card.reasonQuestion": "Awaiting your answer",

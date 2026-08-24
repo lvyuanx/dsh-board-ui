@@ -132,19 +132,26 @@
   outline-offset: 2px;
 }
 .bb-card.is-current {
-  border-color: var(--bb-brand);
-  background: var(--bb-brand-soft);
-  box-shadow: 0 0 0 3px var(--bb-brand-soft);
+  border-color: var(--bb-border);
+  border-left-color: var(--bb-workspace, var(--bb-brand));
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--bb-workspace, var(--bb-brand)) 22%, transparent) 0%,
+      color-mix(in srgb, var(--bb-workspace, var(--bb-brand)) 10%, transparent) 42%,
+      transparent 100%),
+    var(--bb-brand-soft);
 }
-.bb-card.is-focused { box-shadow: 0 0 0 2px var(--bb-brand) inset, var(--bb-shadow-card-hover); }
-/* per-status left accent — blue pending/review, green running, orange action,
-   red failure, gray paused, and neutral completed. */
-.bb-card[data-status="pending"] { border-left: 3px solid var(--bb-brand); }
-.bb-card[data-status="running"] { border-left: 3px solid var(--bb-col-running); }
-.bb-card[data-status="action_required"] { border-left: 3px solid var(--bb-col-pending); }
-.bb-card[data-status="reviewing"] { border-left: 3px solid var(--bb-brand); }
-.bb-card[data-status="failed"] { border-left: 3px solid var(--bb-col-failed); }
-.bb-card[data-status="paused"] { border-left: 3px solid var(--bb-text-3); }
+.bb-card.is-focused { box-shadow: var(--bb-shadow-card-hover); }
+/* Project identity starts at the left edge and fades across the card. */
+.bb-card {
+  border-left: 4px solid var(--bb-workspace, var(--bb-border));
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--bb-workspace, var(--bb-brand)) 20%, transparent) 0%,
+      color-mix(in srgb, var(--bb-workspace, var(--bb-brand)) 10%, transparent) 42%,
+      transparent 100%),
+    var(--bb-panel);
+}
 /* shared card anatomy: head (project + time) / title / status badge /
    hint lines / agent stats / progress / actions */
 .bb-card-head {

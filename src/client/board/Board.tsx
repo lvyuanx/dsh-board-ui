@@ -183,12 +183,12 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
   return (
     <div
       className={"bb-card" + (current ? " is-current" : "") + (focused ? " is-focused" : "")}
-      style={{ "--i": animIndex }}
+      style={{ "--i": animIndex, "--bb-workspace": wsColor }}
       data-status={status}
       data-session={session.id}
       tabIndex={0}
       role="group"
-      aria-label={session.displayTitle}
+      aria-label={t("card.projectTask", { project: wsTitle, title: session.displayTitle })}
       draggable={!busy}
       aria-busy={busy || undefined}
       onDragStart={(e) => { onDragStart(e, session.id); }}
@@ -200,9 +200,10 @@ function TaskCard({ item, wsColor, wsTitle, animIndex, current, focused, editing
       onContextMenu={(e) => { e.preventDefault(); onMenu(e); }}
     >
       <div className="bb-card-head">
-        <span className="bb-ws-badge">
-          <span className="bb-ws-dot" style={{ background: wsColor }} />
-          {wsTitle}
+        <span className="bb-ws-badge" title={wsTitle}>
+          <span className="bb-ws-dot" aria-hidden />
+          <span className="bb-ws-label">{t("card.project")}</span>
+          <span className="bb-ws-title">{wsTitle}</span>
         </span>
         <span className="bb-card-time">{relativeTime(session.updatedAt, t)}</span>
       </div>
@@ -561,10 +562,11 @@ export function Board({ useStore, useSessions, useWorkspaces, actions, t, filter
     </button>
   );
 
-  // Blank-area click collapses the right drawer (interactive elements excluded).
+  // Blank-area click clears keyboard selection and collapses the drawer.
   const onBlankClick = (e) => {
     const target = e.target;
     if (target instanceof Element && target.closest(".bb-card, .bb-menu, .bb-filter, button, input, select, textarea, a")) return;
+    actions.setFocus(null);
     collapseDrawer();
   };
 
